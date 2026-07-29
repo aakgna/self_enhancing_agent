@@ -78,7 +78,7 @@ def cred_user():
     shutil.rmtree(AGENTS_ROOT / uid)
     conn = get_conn()
     conn.execute("DELETE FROM manifest_embeddings WHERE manifest_id = %s", (manifest.key,))
-    for table in ("traces", "capability_ledger", "capability_gaps"):
+    for table in ("traces", "capability_ledger", "capability_gaps", "usage_log"):
         conn.execute(f"DELETE FROM {table} WHERE user_id = %s", (uid,))
     conn.execute("DELETE FROM agent_prompts WHERE agent_id = 'mail_reader'")
     conn.execute("DELETE FROM agent_prompt_current WHERE agent_id = 'mail_reader'")

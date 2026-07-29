@@ -5,6 +5,7 @@
 Commands:
     :prompt <agent_id> <text>     set a new live prompt version (no restart)
     :rollback <agent_id> <n>      move the current-version pointer back
+    :bad                          mark the previous answer as wrong (feeds eval)
     :quit
 """
 
@@ -61,6 +62,12 @@ def main() -> None:
             _, agent_id, target = line.split(" ", 2)
             prompt_store.rollback(agent_id, prompt_store.SHARED_USER, int(target))
             print(f"[{agent_id} prompt pointer -> v{target}]")
+            continue
+        if line == ":bad":
+            from eval import usage_logger
+
+            usage_logger.mark_last_corrected(args.user)
+            print("[previous turn marked as corrected]")
             continue
 
         state["messages"] = state["messages"] + [HumanMessage(content=line)]

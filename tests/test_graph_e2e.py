@@ -34,8 +34,8 @@ def user_id():
     uid = f"_e2e_{uuid.uuid4().hex[:8]}"
     yield uid
     conn = get_conn()
-    conn.execute("DELETE FROM traces WHERE user_id = %s", (uid,))
-    conn.execute("DELETE FROM capability_gaps WHERE user_id = %s", (uid,))
+    for table in ("traces", "capability_gaps", "usage_log"):
+        conn.execute(f"DELETE FROM {table} WHERE user_id = %s", (uid,))
 
 
 def test_graph_end_to_end(monkeypatch, user_id):

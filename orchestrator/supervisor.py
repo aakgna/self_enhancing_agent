@@ -193,6 +193,10 @@ def execute_node(state: AgentState) -> dict:
         payload={"n_messages": len(update.get("messages", []))},
     )
 
+    from eval import usage_logger  # Phase 5: every turn feeds the replay corpus
+
+    usage_logger.log_turn(state["user_id"], _latest_human_text(state), agent_id)
+
     # The dispatcher owns the scratchpad merge (see state.py docstring).
     return {
         "messages": update.get("messages", []),

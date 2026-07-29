@@ -48,6 +48,20 @@ CREATE TABLE IF NOT EXISTS capability_gaps (
   rejected_matches JSONB NOT NULL
 );
 
+-- Phase 5: per-turn usage log, auto-derived from real traffic — the replay
+-- corpus for regression testing. outcome is explicit feedback when we have
+-- it, otherwise the weak "no immediate correction" proxy.
+CREATE TABLE IF NOT EXISTS usage_log (
+  id         BIGSERIAL PRIMARY KEY,
+  ts         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  user_id    TEXT NOT NULL,
+  request    TEXT NOT NULL,
+  agent_used TEXT NOT NULL,
+  outcome    TEXT NOT NULL DEFAULT 'assumed_ok'
+);
+
+CREATE INDEX IF NOT EXISTS usage_log_user_ts ON usage_log (user_id, ts DESC);
+
 -- Phase 3: generation attempts that failed after retries. Never registered,
 -- never callable — kept for improving the generator prompt itself.
 -- Phase 4: append-only audit of credentialed capability bindings. The audit

@@ -58,6 +58,12 @@ def make_agent(
         return None
 
     progress(f"[agent_maker] registered new agent: {manifest.id}")
+
+    # Phase 5: async, silent, non-blocking — the agent is already live; this
+    # never delays registration or availability.
+    from eval import regression_runner
+
+    regression_runner.on_agent_registered(user_id, manifest.id)
     return manifest.id
 
 
