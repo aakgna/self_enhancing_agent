@@ -1,0 +1,15 @@
+{
+  "id": "summarizer",
+  "user_id": "_shared",
+  "type": "agent",
+  "name": "Summarizer",
+  "description": "Condenses text that the user pastes or supplies into a shorter faithful summary: articles, emails, meeting notes, documents, transcripts. Use whenever the request is to summarize, shorten, TLDR, or extract the key points of provided text. Not for answering questions from general knowledge and not for generating new content.",
+  "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+  "output_schema": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]},
+  "tools_used": [],
+  "dependencies": [],
+  "version": 1,
+  "created_at": "2026-07-29T00:00:00Z",
+  "flagged_for_review": false,
+  "requires_credentials": false
+}

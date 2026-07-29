@@ -1,0 +1,25 @@
+[project]
+name = "enhanced-agent"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastembed>=0.8.0",
+    "langchain-anthropic>=1.5.3",
+    "langchain-core>=1.5.2",
+    "langgraph>=1.2.10",
+    "psycopg[binary]>=3.3.4",
+    "pydantic>=2.13.4",
+    "python-dotenv>=1.2.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+# Repo-level unit tests only. Agent test suites are self-contained and run
+# per-directory (that is also how the generation sandbox runs them):
+#   uv run pytest agents/_shared/general_qa
+testpaths = ["tests"]
+pythonpath = ["."]

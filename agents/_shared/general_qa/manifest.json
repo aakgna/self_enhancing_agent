@@ -1,0 +1,15 @@
+{
+  "id": "general_qa",
+  "user_id": "_shared",
+  "type": "agent",
+  "name": "General Q&A",
+  "description": "Answers open-ended factual and conversational questions directly from the model's own knowledge. Use for definitions, explanations, how-things-work questions, recommendations, and general conversation. Not for transforming or condensing text the user supplies, and not for tasks that need external data or credentials.",
+  "input_schema": {"type": "object", "properties": {"question": {"type": "string"}}, "required": ["question"]},
+  "output_schema": {"type": "object", "properties": {"answer": {"type": "string"}}, "required": ["answer"]},
+  "tools_used": [],
+  "dependencies": [],
+  "version": 1,
+  "created_at": "2026-07-29T00:00:00Z",
+  "flagged_for_review": false,
+  "requires_credentials": false
+}
