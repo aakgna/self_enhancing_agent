@@ -61,6 +61,21 @@ Every node writes a `traces` row stamped with `agent_id`, `agent_version`,
 `prompt_version`, `manifest_version` — set up in Phase 0 so every later phase
 inherits it.
 
+## Live verification (needs ANTHROPIC_API_KEY in .env)
+
+Everything mechanical is covered by the offline suite (34 tests). Three
+checks exercise the real models:
+
+```sh
+uv run python -m eval.tune_threshold --live   # Phase 2 exit: end-to-end routing accuracy
+uv run python -m orchestrator.chat --user me  # Phase 0 exit: ask a question, then paste text to summarize
+# Phase 3 exit, inside the REPL: "convert this text to pig latin: hello world"
+#   -> plans, generates, sandbox-tests, registers, and answers; then check
+#      `git status` (only agents/me/... created) and re-ask to see it route
+#      directly. "check my email for anything urgent" exercises the Phase 4
+#      approval gate against the mock email service.
+```
+
 ## Production notes
 
 The generation sandbox uses macOS `sandbox-exec` locally (network denied,
