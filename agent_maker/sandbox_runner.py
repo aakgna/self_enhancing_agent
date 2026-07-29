@@ -1,12 +1,13 @@
-"""Run a generated agent's tests inside a macOS sandbox.
+"""Run a generated agent's tests (and system-authored checks) inside a macOS
+sandbox.
 
 Guarantees, regardless of what the generated code tries:
   - no network access
   - writes confined to the agent's own directory (+ OS temp)
   - fully scrubbed environment — no API keys, no credentials, no dotfiles
 
-Production swap: replace run_tests() with a Docker/E2B implementation; the
-interface is just (agent_dir) -> (passed, output).
+Production swap: replace _run() with a Docker/E2B implementation; the
+interface is just (agent_dir, argv) -> (passed, output).
 """
 
 import subprocess
@@ -33,7 +34,7 @@ _PROFILE_TEMPLATE = """\
 TIMEOUT_SECONDS = 120
 
 
-def run_tests(agent_dir: Path) -> tuple[bool, str]:
+def _run(agent_dir: Path, argv: list[str]) -> tuple[bool, str]:
     agent_dir = agent_dir.resolve()
     with tempfile.NamedTemporaryFile("w", suffix=".sb", delete=False) as profile:
         profile.write(_PROFILE_TEMPLATE.format(agent_dir=agent_dir))
@@ -41,19 +42,7 @@ def run_tests(agent_dir: Path) -> tuple[bool, str]:
 
     try:
         proc = subprocess.run(
-            [
-                "sandbox-exec",
-                "-f",
-                profile_path,
-                str(PYTHON),
-                "-m",
-                "pytest",
-                "test_agent.py",
-                "-q",
-                "--no-header",
-                "-p",
-                "no:cacheprovider",
-            ],
+            ["sandbox-exec", "-f", profile_path, *argv],
             cwd=agent_dir,
             env={
                 # Deliberately minimal: no ANTHROPIC_API_KEY, no user env.
@@ -66,9 +55,23 @@ def run_tests(agent_dir: Path) -> tuple[bool, str]:
             timeout=TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired:
-        return False, f"tests timed out after {TIMEOUT_SECONDS}s"
+        return False, f"timed out after {TIMEOUT_SECONDS}s"
     finally:
         Path(profile_path).unlink(missing_ok=True)
 
     output = (proc.stdout + proc.stderr).strip()
     return proc.returncode == 0, output[-4000:]
+
+
+def run_tests(agent_dir: Path) -> tuple[bool, str]:
+    return _run(
+        agent_dir,
+        [str(PYTHON), "-m", "pytest", "test_agent.py", "-q", "--no-header", "-p", "no:cacheprovider"],
+    )
+
+
+def run_script(agent_dir: Path, script: str) -> tuple[bool, str]:
+    """Run an arbitrary system-authored Python script with cwd=agent_dir,
+    under the same containment as run_tests. Used for checks the generator
+    doesn't author itself (see agent_maker/contract_check.py)."""
+    return _run(agent_dir, [str(PYTHON), "-c", script])

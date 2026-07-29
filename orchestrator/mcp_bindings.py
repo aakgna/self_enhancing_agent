@@ -23,13 +23,39 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
 CREDENTIALS_PATH = REPO_ROOT / "local_cache" / "credentials.json"
 
-# The catalog of credentialed services the planner may propose. In production
-# each entry would carry a real OAuth flow; the mock issues a demo token.
+# The catalog of credentialed services the planner may propose. "tools" is the
+# ground truth for what a bound service actually exposes — the generator's
+# system prompt is built from this, not guessed, so a generated agent calls
+# real tool names instead of inventing an interface. Keep this in sync with
+# the corresponding MCP server's @mcp.tool() definitions.
+#
+# In production each entry would carry a real OAuth flow (see
+# is_real_service / real_service_note below for how that's surfaced to the
+# user); the mock issues a demo token with no external auth.
 KNOWN_SERVICES = {
     "mock_email": {
         "scope": "read-only access to your (mock) email inbox",
         "server": str(REPO_ROOT / "tools" / "shared" / "mock_email_mcp" / "server.py"),
         "credential_env": "MOCK_EMAIL_TOKEN",
+        "real_service_note": (
+            "This is a local mock with sample data, not your real Gmail account. "
+            "It does not ask you to sign in, and it cannot read or send real "
+            "email. Wiring up real Gmail would require registering a Google "
+            "Cloud OAuth client and completing a real consent flow — ask if "
+            "you want that built."
+        ),
+        "tools": [
+            {
+                "name": "list_unread",
+                "description": "List unread emails in the user's inbox, most recent first.",
+                "args": {"limit": "int, default 10 — max number of emails to return"},
+            },
+            {
+                "name": "search_email",
+                "description": "Search all emails (subject and sender) for a query string.",
+                "args": {"query": "str — search string"},
+            },
+        ],
     },
 }
 

@@ -5,3 +5,9 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 local_cache/
+.claude/
+
+# Generated per-user agents are runtime state, not source — never commit them.
+# _shared/ holds the hand-written agents that ARE committed.
+agents/*/
+!agents/_shared/

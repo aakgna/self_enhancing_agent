@@ -11,7 +11,7 @@ import shutil
 import time
 from pathlib import Path
 
-from agent_maker import planner, registrar, sandbox_runner
+from agent_maker import contract_check, planner, registrar, sandbox_runner
 from agent_maker.generator import GenerationSession
 from orchestrator.agent_loader import AGENTS_ROOT
 from orchestrator.registry import SearchHit
@@ -70,6 +70,8 @@ def make_agent(
 async def _generate_with_retries(
     spec, agent_dir: Path, request: str, progress
 ) -> tuple[bool, str]:
+    check_contract = contract_check.applies(spec.mcp_service)
+
     async with GenerationSession(spec, agent_dir, request, progress) as session:
         progress("[agent_maker] generating (tests first, then implementation)...")
         await session.generate()
@@ -77,11 +79,23 @@ async def _generate_with_retries(
         for attempt in range(MAX_RETRIES + 1):
             progress(f"[agent_maker] sandbox test run {attempt + 1}/{MAX_RETRIES + 1}...")
             passed, output = sandbox_runner.run_tests(agent_dir)
+
+            if passed and check_contract:
+                progress("[agent_maker] tests passed — checking the tools contract...")
+                passed, contract_output = contract_check.run_contract_check(
+                    agent_dir, spec.mcp_service, request
+                )
+                if not passed:
+                    output = (
+                        "The generated tests passed, but run() does not match the "
+                        "real tools contract:\n\n" + contract_output
+                    )
+
             if passed:
                 progress("[agent_maker] tests passed in sandbox.")
                 return True, output
             if attempt < MAX_RETRIES:
-                progress("[agent_maker] tests failed — feeding output back for a fix...")
+                progress("[agent_maker] checks failed — feeding output back for a fix...")
                 await session.refine(output)
         return False, output
 

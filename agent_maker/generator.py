@@ -25,6 +25,7 @@ from claude_agent_sdk import (
 )
 
 from agent_maker.planner import AgentSpec
+from orchestrator.mcp_bindings import KNOWN_SERVICES
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_PATH = Path(__file__).parent / "prompts" / "generator_system_prompt.md"
@@ -34,6 +35,93 @@ GENERATOR_MODEL = "claude-opus-4-8"
 MAX_TURNS = 50
 
 _PATH_KEYS = ("file_path", "path", "notebook_path")
+
+# Ground truth for what a bound service actually hands run(): the SDK's own
+# tool objects, not a hallucinated interface. See mcp_bindings.get_tools()
+# and orchestrator/supervisor.py::_credential_gate — this is exactly what
+# `tools` is at runtime.
+_CREDENTIALED_TOOLS_SECTION = '''\
+## Credentialed tools contract
+
+This agent requires credentials. When the connection is approved, the
+supervisor calls `run(state, system_prompt, llm, tools=bound_tools)` where
+`bound_tools` is a `list` of LangChain `StructuredTool` objects — NOT an
+object with one method per capability. Each tool has:
+
+  - `.name: str` — the tool's name
+  - `.invoke(dict) -> str` — call it with a dict of its arguments
+
+Look a tool up by name and call `.invoke()`; do not guess a method name or
+attribute-access the list. When `tools` is `None` (not yet connected — this
+is what the sandbox and your tests always see, since there is no real
+credential there), reply that the capability is not connected and touch
+nothing else.
+
+The bound service for this agent is `{service_name}`, exposing exactly these
+tools (call these names and only these names):
+
+{tool_catalog}
+
+Worked pattern for agent.py:
+
+```python
+def run(state, system_prompt, llm, tools=None):
+    if not tools:
+        return {{
+            "messages": [AIMessage(content="{service_name} is not connected yet.")],
+            "agent_scratchpad": {{AGENT_ID: {{"connected": False}}}},
+        }}
+    tool = next(t for t in tools if t.name == "{example_tool_name}")
+    result = tool.invoke({example_tool_args})
+    ...
+```
+
+Worked pattern for test_agent.py — fake tools the same shape as real ones,
+never a bare list, dict, or custom object with method-per-capability:
+
+```python
+class FakeTool:
+    def __init__(self, name, result):
+        self.name = name
+        self.result = result
+        self.calls = []
+
+    def invoke(self, args):
+        self.calls.append(args)
+        return self.result
+
+def test_uses_bound_tool_by_name():
+    tool = FakeTool("{example_tool_name}", {example_tool_fake_result!r})
+    update = run(make_state(), "system prompt", FakeLLM(), tools=[tool])
+    assert tool.calls, "must call the tool via .invoke(), not guess a method"
+
+def test_not_connected_when_tools_is_none():
+    update = run(make_state(), "system prompt", FakeLLM(), tools=None)
+    assert update["agent_scratchpad"][AGENT_ID]["connected"] is False
+```
+'''
+
+
+def _credentialed_tools_section(spec: AgentSpec) -> str:
+    if not (spec.requires_credentials and spec.mcp_service in KNOWN_SERVICES):
+        return (
+            "This agent does not require credentials — it must not accept a "
+            "`tools` parameter or reach for any external service.\n"
+        )
+    entry = KNOWN_SERVICES[spec.mcp_service]
+    catalog = "\n".join(
+        f"  - `{t['name']}({', '.join(t['args'])})` — {t['description']}"
+        for t in entry["tools"]
+    )
+    example_tool = entry["tools"][0]
+    example_args = {name: "..." for name in example_tool["args"]}
+    return _CREDENTIALED_TOOLS_SECTION.format(
+        service_name=spec.mcp_service,
+        tool_catalog=catalog,
+        example_tool_name=example_tool["name"],
+        example_tool_args=example_args,
+        example_tool_fake_result="fake result",
+    )
 
 
 def build_system_prompt(spec: AgentSpec, agent_dir: Path, triggering_request: str) -> str:
@@ -54,6 +142,7 @@ def build_system_prompt(spec: AgentSpec, agent_dir: Path, triggering_request: st
         "{agent_dir}": str(agent_dir),
         "{spec_json}": spec.model_dump_json(indent=2),
         "{triggering_request}": triggering_request,
+        "{credentialed_tools_section}": _credentialed_tools_section(spec),
     }
     prompt = template
     for placeholder, value in replacements.items():

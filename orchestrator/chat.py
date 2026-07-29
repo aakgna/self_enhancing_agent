@@ -82,6 +82,8 @@ def main() -> None:
                 f"  scope:  {payload['scope']}\n"
                 f"  reason: your request \"{payload['reason']}\""
             )
+            if payload.get("note"):
+                print(f"  note:   {payload['note']}")
             answer = input("  approve this connection? [y/N] ").strip().lower()
             result = graph.invoke(Command(resume={"approved": answer == "y"}), config)
 

@@ -140,11 +140,13 @@ def _credential_gate(state: AgentState, handle) -> list | None:
 
     user_id, request = state["user_id"], _latest_human_text(state)
     if not mcp_bindings.is_bound(user_id, service):
+        service_entry = mcp_bindings.KNOWN_SERVICES[service]
         decision = interrupt(
             {
                 "type": "credential_approval",
                 "service": service,
-                "scope": mcp_bindings.KNOWN_SERVICES[service]["scope"],
+                "scope": service_entry["scope"],
+                "note": service_entry.get("real_service_note"),
                 "agent_id": handle.agent_id,
                 "reason": request,
             }
@@ -171,8 +173,15 @@ def execute_node(state: AgentState) -> dict:
     tools = _credential_gate(state, handle)
 
     module = agent_loader.load_module(handle)
+    # Prompt scope follows the agent's OWNING user (its manifest), not the
+    # caller: "_shared" for hand-written agents, the generating user for
+    # per-user generated ones. Using SHARED_USER unconditionally here would
+    # collide two different users' same-named generated agents into one
+    # global prompt — a real violation of the per-user isolation this system
+    # is designed around.
+    prompt_owner = handle.manifest.get("user_id", prompt_store.SHARED_USER)
     prompt, prompt_version = prompt_store.seed_prompt(
-        agent_id, prompt_store.SHARED_USER, module.DEFAULT_PROMPT
+        agent_id, prompt_owner, module.DEFAULT_PROMPT
     )
 
     if "tools" in inspect.signature(module.run).parameters:

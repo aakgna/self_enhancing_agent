@@ -67,6 +67,7 @@ pattern.
 {summarizer_test_py}
 ```
 
+{credentialed_tools_section}
 ## Hard scope constraint
 
 You may only create new files inside the current working directory
@@ -110,11 +111,11 @@ The user request that exposed this capability gap (your agent must handle it):
    output_schema, tools_used, and requires_credentials exactly as in the spec.
 4. If the spec lists new tools, implement each as a separate small .py module
    in this directory with pure, directly-testable functions.
-5. If requires_credentials is true: never attempt real network access. Define
-   the external dependency as an injectable parameter with a safe default
-   (`def run(state, system_prompt, llm, tools=None)`); when tools is None,
-   reply that the capability is not yet connected. Test both branches with
-   fakes.
+5. If requires_credentials is true: never attempt real network access. Accept
+   the tools exactly as described in the "Credentialed tools contract"
+   section below — do not invent a different interface. Test both the
+   `tools=None` branch and the bound branch with fakes shaped like real
+   `StructuredTool` objects, as shown in that section.
 6. Run nothing. Do not try to execute the tests yourself — the system runs
    them in a sandbox and will send you the failure output if anything fails.
 
