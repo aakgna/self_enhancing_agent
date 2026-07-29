@@ -17,6 +17,7 @@ from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
+    HookMatcher,
     PermissionResultAllow,
     PermissionResultDeny,
     TextBlock,
@@ -60,23 +61,56 @@ def build_system_prompt(spec: AgentSpec, agent_dir: Path, triggering_request: st
     return prompt
 
 
+def _resolve_violation(agent_dir: Path, tool_name: str, tool_input: dict) -> str | None:
+    for key in _PATH_KEYS:
+        raw = tool_input.get(key)
+        if raw is None:
+            continue
+        resolved = (agent_dir / raw).resolve() if not Path(raw).is_absolute() else Path(raw).resolve()
+        if not resolved.is_relative_to(agent_dir):
+            return (
+                f"{tool_name} on {resolved} is outside the agent directory "
+                f"{agent_dir}; you may only touch files inside it."
+            )
+    return None
+
+
 def _confinement_guard(agent_dir: Path):
+    """can_use_tool fallback path. NOTE: when a tool is named in allowed_tools
+    as a whole-tool allow (as ours are, for Read/Write/Edit), the SDK
+    auto-approves it before this callback ever runs (CanUseToolShadowedWarning)
+    — so this alone does NOT enforce containment. The real enforcement is the
+    PreToolUse hook below; this is kept as defense in depth for any tool call
+    that does reach the callback (e.g. if allowed_tools is narrowed later)."""
     agent_dir = agent_dir.resolve()
 
     async def guard(tool_name: str, tool_input: dict, _context):
-        for key in _PATH_KEYS:
-            raw = tool_input.get(key)
-            if raw is None:
-                continue
-            resolved = (agent_dir / raw).resolve() if not Path(raw).is_absolute() else Path(raw).resolve()
-            if not resolved.is_relative_to(agent_dir):
-                return PermissionResultDeny(
-                    message=f"{tool_name} on {resolved} is outside the agent directory "
-                    f"{agent_dir}; you may only touch files inside it."
-                )
+        violation = _resolve_violation(agent_dir, tool_name, tool_input)
+        if violation:
+            return PermissionResultDeny(message=violation)
         return PermissionResultAllow()
 
     return guard
+
+
+def _confinement_hook(agent_dir: Path):
+    """PreToolUse hook: this is what actually gates Read/Write/Edit, since
+    allowed_tools shadows can_use_tool for whole-tool allows."""
+    agent_dir = agent_dir.resolve()
+
+    async def hook(input_data: dict, _tool_use_id, _context) -> dict:
+        violation = _resolve_violation(agent_dir, input_data["tool_name"], input_data["tool_input"])
+        if violation:
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": violation,
+                }
+            }
+        return {}
+
+    return hook
 
 
 class GenerationSession:
@@ -93,6 +127,7 @@ class GenerationSession:
             disallowed_tools=["Bash", "WebSearch", "WebFetch", "Task", "Glob", "Grep"],
             permission_mode="acceptEdits",
             can_use_tool=_confinement_guard(agent_dir),
+            hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[_confinement_hook(agent_dir)])]},
             model=GENERATOR_MODEL,
             max_turns=MAX_TURNS,
         )

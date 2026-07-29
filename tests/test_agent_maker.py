@@ -7,7 +7,7 @@ import json
 import pytest
 
 from agent_maker import maker, registrar
-from agent_maker.generator import _confinement_guard, build_system_prompt
+from agent_maker.generator import _confinement_guard, _confinement_hook, build_system_prompt
 from agent_maker.planner import AgentSpec
 from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 from db import prompt_store
@@ -56,6 +56,29 @@ def test_confinement_guard_denies_outside_writes(tmp_path):
     assert isinstance(relative, PermissionResultAllow)
     assert isinstance(outside, PermissionResultDeny)
     assert isinstance(traversal, PermissionResultDeny)
+
+
+def test_confinement_hook_is_the_real_enforcement_path(tmp_path):
+    """allowed_tools=[...] auto-approves Read/Write/Edit before can_use_tool
+    runs (CanUseToolShadowedWarning) — this PreToolUse hook is what actually
+    gates those calls. Must produce the exact hookSpecificOutput shape the
+    SDK expects for a deny/allow decision."""
+    hook = _confinement_hook(tmp_path)
+
+    async def check():
+        allowed = await hook(
+            {"tool_name": "Write", "tool_input": {"file_path": "agent.py"}}, "id1", None
+        )
+        denied = await hook(
+            {"tool_name": "Write", "tool_input": {"file_path": "/etc/hosts"}}, "id2", None
+        )
+        return allowed, denied
+
+    allowed, denied = asyncio.run(check())
+    assert allowed == {}
+    assert denied["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "/etc/hosts" in denied["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 def test_registrar_normalizes_and_requires_files(spec, tmp_path, monkeypatch):
