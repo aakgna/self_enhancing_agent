@@ -8,15 +8,18 @@ The execute node is also the enforcement point for the State write rule and
 the place every trace row gets its four-part version stamp.
 """
 
+import inspect
+
 from langchain_core.messages import AIMessage, BaseMessage
 
 from db import prompt_store
-from orchestrator import agent_loader, classifier, registry
+from orchestrator import agent_loader, classifier, mcp_bindings, registry
 from orchestrator.llm import agent_llm
 from orchestrator.state import AgentState
 from orchestrator.tracing import write_trace
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
 
 ALLOWED_UPDATE_KEYS = {"messages", "agent_scratchpad"}
 
@@ -121,17 +124,61 @@ def validate_update(agent_id: str, update: dict) -> None:
             raise ScratchpadViolation(f"{agent_id} appended a non-message to messages")
 
 
+def _credential_gate(state: AgentState, handle) -> list | None:
+    """Phase 4: pause for explicit approval before any real binding; return
+    live tools for a bound service, else None.
+
+    interrupt() replays the node from the top on resume, so this runs before
+    any non-idempotent work in execute_node.
+    """
+    manifest = handle.manifest
+    if not manifest.get("requires_credentials"):
+        return None
+    service = manifest.get("mcp_service")
+    if service not in mcp_bindings.KNOWN_SERVICES:
+        return None
+
+    user_id, request = state["user_id"], _latest_human_text(state)
+    if not mcp_bindings.is_bound(user_id, service):
+        decision = interrupt(
+            {
+                "type": "credential_approval",
+                "service": service,
+                "scope": mcp_bindings.KNOWN_SERVICES[service]["scope"],
+                "agent_id": handle.agent_id,
+                "reason": request,
+            }
+        )
+        if not (isinstance(decision, dict) and decision.get("approved")):
+            write_trace(
+                user_id=user_id, node="execute", event="binding_declined",
+                agent_id=handle.agent_id, payload={"service": service},
+            )
+            return None
+        mcp_bindings.bind(user_id, service, request)
+        write_trace(
+            user_id=user_id, node="execute", event="capability_bound",
+            agent_id=handle.agent_id, payload={"service": service},
+        )
+    return mcp_bindings.get_tools(user_id, service)
+
+
 def execute_node(state: AgentState) -> dict:
     agent_id = state["active_agent"]
     handles = agent_loader.discover(state["user_id"])
     handle = handles[agent_id]
-    module = agent_loader.load_module(handle)
 
+    tools = _credential_gate(state, handle)
+
+    module = agent_loader.load_module(handle)
     prompt, prompt_version = prompt_store.seed_prompt(
         agent_id, prompt_store.SHARED_USER, module.DEFAULT_PROMPT
     )
 
-    update = module.run(state, prompt, agent_llm())
+    if "tools" in inspect.signature(module.run).parameters:
+        update = module.run(state, prompt, agent_llm(), tools=tools)
+    else:
+        update = module.run(state, prompt, agent_llm())
     validate_update(agent_id, update)
     scratch_update = update.get("agent_scratchpad", {})
 
@@ -153,7 +200,7 @@ def execute_node(state: AgentState) -> dict:
     }
 
 
-def build_graph():
+def build_graph(checkpointer=None):
     graph = StateGraph(AgentState)
     graph.add_node("route", route_node)
     graph.add_node("execute", execute_node)
@@ -162,4 +209,4 @@ def build_graph():
     graph.add_conditional_edges("route", _after_route, ["execute", "make_agent"])
     graph.add_conditional_edges("make_agent", _after_make, ["execute", END])
     graph.add_edge("execute", END)
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)

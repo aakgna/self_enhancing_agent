@@ -37,6 +37,10 @@ class AgentSpec(BaseModel):
     existing_tools_needed: list[str] = Field(default_factory=list)
     new_tools_needed: list[NewToolSpec] = Field(default_factory=list)
     requires_credentials: bool = False
+    mcp_service: str | None = Field(
+        default=None,
+        description="If credentials are required: the matching service name from the catalog, else null",
+    )
     example_requests: list[str] = Field(
         default_factory=list,
         description="5-8 diverse user phrasings this agent should handle",
@@ -60,6 +64,9 @@ implements in code; only genuinely language-heavy work should lean on an LLM.
 - requires_credentials is true only if the capability needs an external \
 authenticated service (email, calendar, paid APIs). Local computation never \
 requires credentials.
+- Credentialed services available for binding (set mcp_service to the name if \
+one fits, else leave it null):
+{services}
 - Propose new tools only for reusable, self-contained pieces of logic; most \
 small agents need none.
 - example_requests must be diverse phrasings a real user would type."""
@@ -102,14 +109,21 @@ def dedup_tools(spec: AgentSpec, user_id: str) -> AgentSpec:
 
 
 def plan(request: str, rejected: list[SearchHit], user_id: str) -> AgentSpec:
+    from orchestrator.mcp_bindings import KNOWN_SERVICES
+
     rejected_text = "\n".join(
         f"- {h.manifest.id}: {h.manifest.description}" for h in rejected
     ) or "- (none were close)"
+    services_text = "\n".join(
+        f"  - {name}: {entry['scope']}" for name, entry in KNOWN_SERVICES.items()
+    ) or "  - (none available)"
     spec = (
         agent_llm()
         .with_structured_output(AgentSpec)
-        .invoke(_PROMPT.format(request=request, rejected=rejected_text))
+        .invoke(_PROMPT.format(request=request, rejected=rejected_text, services=services_text))
     )
+    if spec.mcp_service not in KNOWN_SERVICES:
+        spec.mcp_service = None
     spec.proposed_agent_name = _sanitize_name(spec.proposed_agent_name, user_id)
     if request not in spec.example_requests:
         spec.example_requests.insert(0, request)

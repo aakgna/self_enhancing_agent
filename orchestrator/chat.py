@@ -14,6 +14,8 @@ import sys
 
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
 
 from db import prompt_store
 from orchestrator.supervisor import build_graph
@@ -29,7 +31,8 @@ def main() -> None:
     args = parser.parse_args()
 
     prompt_store.init_db()
-    graph = build_graph()
+    graph = build_graph(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": args.user}}
 
     state = {
         "messages": [],
@@ -61,7 +64,21 @@ def main() -> None:
             continue
 
         state["messages"] = state["messages"] + [HumanMessage(content=line)]
-        state = graph.invoke(state)
+        result = graph.invoke(state, config)
+
+        # Phase 4: credential-approval interrupts pause the graph mid-request.
+        while "__interrupt__" in result:
+            payload = result["__interrupt__"][0].value
+            print(
+                f"\n[approval needed] agent '{payload['agent_id']}' wants to connect "
+                f"to '{payload['service']}'\n"
+                f"  scope:  {payload['scope']}\n"
+                f"  reason: your request \"{payload['reason']}\""
+            )
+            answer = input("  approve this connection? [y/N] ").strip().lower()
+            result = graph.invoke(Command(resume={"approved": answer == "y"}), config)
+
+        state = {k: v for k, v in result.items() if k != "__interrupt__"}
         print(f"[{state['active_agent']}] {state['messages'][-1].content}")
 
 

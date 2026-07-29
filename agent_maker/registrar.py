@@ -37,6 +37,7 @@ def register(spec: AgentSpec, agent_dir: Path, user_id: str, triggering_request:
         version=1,
         flagged_for_review=False,
         requires_credentials=spec.requires_credentials,
+        mcp_service=spec.mcp_service,
     )
     manifest = Manifest.model_validate(data)
     if triggering_request not in manifest.example_requests:

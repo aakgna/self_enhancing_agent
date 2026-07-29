@@ -50,6 +50,19 @@ CREATE TABLE IF NOT EXISTS capability_gaps (
 
 -- Phase 3: generation attempts that failed after retries. Never registered,
 -- never callable — kept for improving the generator prompt itself.
+-- Phase 4: append-only audit of credentialed capability bindings. The audit
+-- trail for "what did this agent actually have access to, and since when".
+CREATE TABLE IF NOT EXISTS capability_ledger (
+  id                 BIGSERIAL PRIMARY KEY,
+  ts                 TIMESTAMPTZ NOT NULL DEFAULT now(),
+  user_id            TEXT NOT NULL,
+  service            TEXT NOT NULL,
+  action             TEXT NOT NULL,
+  triggering_request TEXT,
+  approved_at        TIMESTAMPTZ,
+  config             JSONB
+);
+
 CREATE TABLE IF NOT EXISTS generation_failures (
   id        BIGSERIAL PRIMARY KEY,
   ts        TIMESTAMPTZ NOT NULL DEFAULT now(),

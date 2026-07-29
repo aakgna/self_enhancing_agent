@@ -30,6 +30,9 @@ class Manifest(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     flagged_for_review: bool = False
     requires_credentials: bool = False
+    # Which entry in mcp_bindings.KNOWN_SERVICES this agent needs, if any.
+    # Binding only ever happens behind the Phase 4 human-approval gate.
+    mcp_service: str | None = None
 
     @property
     def key(self) -> str:
