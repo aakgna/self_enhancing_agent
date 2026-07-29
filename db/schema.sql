@@ -47,3 +47,16 @@ CREATE TABLE IF NOT EXISTS capability_gaps (
   request          TEXT NOT NULL,
   rejected_matches JSONB NOT NULL
 );
+
+-- Phase 3: generation attempts that failed after retries. Never registered,
+-- never callable — kept for improving the generator prompt itself.
+CREATE TABLE IF NOT EXISTS generation_failures (
+  id        BIGSERIAL PRIMARY KEY,
+  ts        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  user_id   TEXT NOT NULL,
+  agent_id  TEXT NOT NULL,
+  request   TEXT NOT NULL,
+  spec      JSONB NOT NULL,
+  reason    TEXT NOT NULL,
+  output    TEXT
+);

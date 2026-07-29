@@ -72,22 +72,40 @@ def route_node(state: AgentState) -> dict:
     }
 
 
-def no_match_node(state: AgentState) -> dict:
-    """Phase 2 placeholder: Phase 3 replaces this with the Agent Maker chain."""
-    return {
-        "messages": [
-            AIMessage(
-                content=(
-                    "I don't have an agent that covers this yet. "
-                    "(Agent generation arrives in Phase 3.)"
+def make_agent_node(state: AgentState) -> dict:
+    """No existing agent covers the request: generate one, end to end."""
+    from agent_maker import maker  # lazy: keeps the SDK out of ordinary requests
+
+    request = _latest_human_text(state)
+    candidates = registry.search(request, state["user_id"], top_k=5, type_filter="agent")
+    agent_id = maker.make_agent(state["user_id"], request, candidates)
+
+    if agent_id is None:
+        return {
+            "messages": [
+                AIMessage(
+                    content=(
+                        "I couldn't build a working agent for that request — the "
+                        "generated implementation never passed its own tests. The "
+                        "attempt was logged; please try rephrasing or try again."
+                    )
                 )
-            )
-        ]
+            ]
+        }
+
+    entry = {"request": request, "routed_to": agent_id, "generated": True}
+    return {
+        "active_agent": agent_id,
+        "routing_history": [*state["routing_history"], entry],
     }
 
 
 def _after_route(state: AgentState) -> str:
-    return "execute" if state["active_agent"] else "no_match"
+    return "execute" if state["active_agent"] else "make_agent"
+
+
+def _after_make(state: AgentState) -> str:
+    return "execute" if state["active_agent"] else END
 
 
 def validate_update(agent_id: str, update: dict) -> None:
@@ -139,9 +157,9 @@ def build_graph():
     graph = StateGraph(AgentState)
     graph.add_node("route", route_node)
     graph.add_node("execute", execute_node)
-    graph.add_node("no_match", no_match_node)
+    graph.add_node("make_agent", make_agent_node)
     graph.add_edge(START, "route")
-    graph.add_conditional_edges("route", _after_route, ["execute", "no_match"])
+    graph.add_conditional_edges("route", _after_route, ["execute", "make_agent"])
+    graph.add_conditional_edges("make_agent", _after_make, ["execute", END])
     graph.add_edge("execute", END)
-    graph.add_edge("no_match", END)
     return graph.compile()

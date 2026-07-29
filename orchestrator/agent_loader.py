@@ -36,6 +36,8 @@ def _scan(directory: Path) -> dict[str, AgentHandle]:
     if not directory.is_dir():
         return handles
     for sub in sorted(directory.iterdir()):
+        if sub.name.startswith("."):  # e.g. .failed quarantine — never loadable
+            continue
         agent_py = sub / "agent.py"
         manifest_json = sub / "manifest.json"
         if agent_py.is_file() and manifest_json.is_file():

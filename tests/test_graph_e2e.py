@@ -94,6 +94,11 @@ def test_no_match_path_logs_capability_gap(monkeypatch, user_id):
         "fast_llm",
         lambda: FakeClassifierLLM(ClassifierVerdict(decision="no_match_found")),
     )
+    # Generation itself is live-verified; here the maker "fails" so the graph
+    # takes the failure branch offline.
+    import agent_maker.maker as maker_module
+
+    monkeypatch.setattr(maker_module, "make_agent", lambda *a, **k: None)
 
     graph = supervisor.build_graph()
     result = graph.invoke(
@@ -107,7 +112,7 @@ def test_no_match_path_logs_capability_gap(monkeypatch, user_id):
     )
 
     assert result["active_agent"] is None
-    assert "don't have an agent" in result["messages"][-1].content
+    assert "couldn't build a working agent" in result["messages"][-1].content
     assert result["routing_history"][-1]["routed_to"] == "no_match_found"
 
     gaps = get_conn().execute(
