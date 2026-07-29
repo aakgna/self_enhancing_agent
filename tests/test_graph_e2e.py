@@ -9,8 +9,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from db import prompt_store
 from db.conn import get_conn
-from orchestrator import router, supervisor
-from orchestrator.router import RouteChoice
+from orchestrator import classifier, registry, supervisor
+from orchestrator.classifier import ClassifierVerdict
 
 
 class FakeAgentLLM:
@@ -18,33 +18,38 @@ class FakeAgentLLM:
         return AIMessage(content="stub answer")
 
 
-class FakeStructured:
-    def __init__(self, agent_id):
-        self.agent_id = agent_id
-
-    def invoke(self, _prompt):
-        return RouteChoice(agent_id=self.agent_id)
-
-
-class FakeRouterLLM:
-    def __init__(self, agent_id):
-        self.agent_id = agent_id
+class FakeClassifierLLM:
+    def __init__(self, verdict: ClassifierVerdict):
+        self.verdict = verdict
 
     def with_structured_output(self, _schema):
-        return FakeStructured(self.agent_id)
+        return self
+
+    def invoke(self, _prompt):
+        return self.verdict
 
 
 @pytest.fixture()
 def user_id():
     uid = f"_e2e_{uuid.uuid4().hex[:8]}"
     yield uid
-    get_conn().execute("DELETE FROM traces WHERE user_id = %s", (uid,))
+    conn = get_conn()
+    conn.execute("DELETE FROM traces WHERE user_id = %s", (uid,))
+    conn.execute("DELETE FROM capability_gaps WHERE user_id = %s", (uid,))
 
 
 def test_graph_end_to_end(monkeypatch, user_id):
     prompt_store.init_db()
+    registry.init_registry()
+    registry.backfill()
     monkeypatch.setattr(supervisor, "agent_llm", lambda: FakeAgentLLM())
-    monkeypatch.setattr(router, "fast_llm", lambda: FakeRouterLLM("summarizer"))
+    monkeypatch.setattr(
+        classifier,
+        "fast_llm",
+        lambda: FakeClassifierLLM(
+            ClassifierVerdict(decision="route_to_existing", agent_id="summarizer")
+        ),
+    )
 
     graph = supervisor.build_graph()
     result = graph.invoke(
@@ -78,3 +83,36 @@ def test_graph_end_to_end(monkeypatch, user_id):
     assert execute_row[3] == 1  # agent_version
     assert execute_row[4] >= 1  # prompt_version
     assert execute_row[5] == 1  # manifest_version
+
+
+def test_no_match_path_logs_capability_gap(monkeypatch, user_id):
+    prompt_store.init_db()
+    registry.init_registry()
+    registry.backfill()
+    monkeypatch.setattr(
+        classifier,
+        "fast_llm",
+        lambda: FakeClassifierLLM(ClassifierVerdict(decision="no_match_found")),
+    )
+
+    graph = supervisor.build_graph()
+    result = graph.invoke(
+        {
+            "messages": [HumanMessage(content="check my email for urgent messages")],
+            "user_id": user_id,
+            "active_agent": None,
+            "agent_scratchpad": {},
+            "routing_history": [],
+        }
+    )
+
+    assert result["active_agent"] is None
+    assert "don't have an agent" in result["messages"][-1].content
+    assert result["routing_history"][-1]["routed_to"] == "no_match_found"
+
+    gaps = get_conn().execute(
+        "SELECT request, rejected_matches FROM capability_gaps WHERE user_id = %s",
+        (user_id,),
+    ).fetchall()
+    assert len(gaps) == 1
+    assert gaps[0][0] == "check my email for urgent messages"

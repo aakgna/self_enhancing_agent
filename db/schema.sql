@@ -36,3 +36,14 @@ CREATE TABLE IF NOT EXISTS traces (
 );
 
 CREATE INDEX IF NOT EXISTS traces_agent_ts ON traces (agent_id, ts);
+
+-- Phase 2: every no_match_found decision, with the rejected candidates and
+-- their scores. Dual purpose: the Agent Maker's generation backlog, and seed
+-- data for the Phase 5 regression eval.
+CREATE TABLE IF NOT EXISTS capability_gaps (
+  id               BIGSERIAL PRIMARY KEY,
+  ts               TIMESTAMPTZ NOT NULL DEFAULT now(),
+  user_id          TEXT NOT NULL,
+  request          TEXT NOT NULL,
+  rejected_matches JSONB NOT NULL
+);

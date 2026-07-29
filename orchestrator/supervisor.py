@@ -8,10 +8,10 @@ The execute node is also the enforcement point for the State write rule and
 the place every trace row gets its four-part version stamp.
 """
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage
 
 from db import prompt_store
-from orchestrator import agent_loader, router
+from orchestrator import agent_loader, classifier, registry
 from orchestrator.llm import agent_llm
 from orchestrator.state import AgentState
 from orchestrator.tracing import write_trace
@@ -33,9 +33,30 @@ def _latest_human_text(state: AgentState) -> str:
 
 
 def route_node(state: AgentState) -> dict:
-    handles = agent_loader.discover(state["user_id"])
+    """Registry similarity search + capability-gap classifier."""
     request = _latest_human_text(state)
-    agent_id = router.route(request, handles)
+    hits = registry.search(request, state["user_id"], top_k=5, type_filter="agent")
+    result = classifier.classify(request, hits)
+
+    if result.decision == classifier.NO_MATCH:
+        classifier.log_gap(state["user_id"], request, result.candidates)
+        entry = {"request": request, "routed_to": classifier.NO_MATCH}
+        write_trace(
+            user_id=state["user_id"],
+            node="route",
+            event="no_match_found",
+            payload={
+                **entry,
+                "candidates": [
+                    {"agent_id": h.manifest.id, "similarity": round(h.similarity, 4)}
+                    for h in result.candidates
+                ],
+            },
+        )
+        return {"active_agent": None, "routing_history": [*state["routing_history"], entry]}
+
+    agent_id = result.decision
+    handles = agent_loader.discover(state["user_id"])
     entry = {"request": request, "routed_to": agent_id}
     write_trace(
         user_id=state["user_id"],
@@ -49,6 +70,24 @@ def route_node(state: AgentState) -> dict:
         "active_agent": agent_id,
         "routing_history": [*state["routing_history"], entry],
     }
+
+
+def no_match_node(state: AgentState) -> dict:
+    """Phase 2 placeholder: Phase 3 replaces this with the Agent Maker chain."""
+    return {
+        "messages": [
+            AIMessage(
+                content=(
+                    "I don't have an agent that covers this yet. "
+                    "(Agent generation arrives in Phase 3.)"
+                )
+            )
+        ]
+    }
+
+
+def _after_route(state: AgentState) -> str:
+    return "execute" if state["active_agent"] else "no_match"
 
 
 def validate_update(agent_id: str, update: dict) -> None:
@@ -100,7 +139,9 @@ def build_graph():
     graph = StateGraph(AgentState)
     graph.add_node("route", route_node)
     graph.add_node("execute", execute_node)
+    graph.add_node("no_match", no_match_node)
     graph.add_edge(START, "route")
-    graph.add_edge("route", "execute")
+    graph.add_conditional_edges("route", _after_route, ["execute", "no_match"])
     graph.add_edge("execute", END)
+    graph.add_edge("no_match", END)
     return graph.compile()
