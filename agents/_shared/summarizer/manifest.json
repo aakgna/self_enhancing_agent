@@ -4,6 +4,13 @@
   "type": "agent",
   "name": "Summarizer",
   "description": "Condenses text that the user pastes or supplies into a shorter faithful summary: articles, emails, meeting notes, documents, transcripts. Use whenever the request is to summarize, shorten, TLDR, or extract the key points of provided text. Not for answering questions from general knowledge and not for generating new content.",
+  "example_requests": [
+    "summarize this article",
+    "tldr this for me",
+    "shorten these meeting notes to the key points",
+    "give me the main points of this document",
+    "condense this email chain"
+  ],
   "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
   "output_schema": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]},
   "tools_used": [],
