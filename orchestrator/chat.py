@@ -10,6 +10,7 @@ Commands:
 """
 
 import argparse
+import getpass
 import os
 import sys
 
@@ -20,6 +21,50 @@ from langgraph.types import Command
 
 from db import prompt_store
 from orchestrator.supervisor import build_graph
+
+
+def _collect_credential_approval(payload: dict) -> dict:
+    """Prints what's needed and why, then — for credential types that need a
+    real value — collects it. Secret fields are read with getpass (hidden,
+    never echoed, never sent anywhere but stored locally by mcp_bindings)."""
+    print(
+        f"\n[approval needed] agent '{payload['agent_id']}' wants to connect "
+        f"to '{payload['service']}'\n"
+        f"  scope:  {payload['scope']}\n"
+        f"  reason: your request \"{payload['reason']}\""
+    )
+    if payload.get("note"):
+        print(f"  note:   {payload['note']}")
+
+    if payload["credential_type"] == "oauth2":
+        print(
+            "  This service uses OAuth and needs a one-time setup outside this "
+            "app before it can be connected:"
+        )
+        for step in payload["acquisition_instructions"]:
+            print(f"    - {step}")
+        print("  (interactive OAuth sign-in is not implemented yet)")
+        return {"approved": False}
+
+    answer = input("  approve this connection? [y/N] ").strip().lower()
+    if answer != "y":
+        return {"approved": False}
+
+    if not payload["fields"]:
+        return {"approved": True}
+
+    if payload["acquisition_instructions"]:
+        print("  To get what's needed:")
+        for step in payload["acquisition_instructions"]:
+            print(f"    - {step}")
+
+    values = {}
+    for field in payload["fields"]:
+        prompt_text = f"  {field['label']}: "
+        values[field["name"]] = (
+            getpass.getpass(prompt_text) if field["secret"] else input(prompt_text)
+        )
+    return {"approved": True, "values": values}
 
 
 def main() -> None:
@@ -75,17 +120,8 @@ def main() -> None:
 
         # Phase 4: credential-approval interrupts pause the graph mid-request.
         while "__interrupt__" in result:
-            payload = result["__interrupt__"][0].value
-            print(
-                f"\n[approval needed] agent '{payload['agent_id']}' wants to connect "
-                f"to '{payload['service']}'\n"
-                f"  scope:  {payload['scope']}\n"
-                f"  reason: your request \"{payload['reason']}\""
-            )
-            if payload.get("note"):
-                print(f"  note:   {payload['note']}")
-            answer = input("  approve this connection? [y/N] ").strip().lower()
-            result = graph.invoke(Command(resume={"approved": answer == "y"}), config)
+            resume_payload = _collect_credential_approval(result["__interrupt__"][0].value)
+            result = graph.invoke(Command(resume=resume_payload), config)
 
         state = {k: v for k, v in result.items() if k != "__interrupt__"}
         print(f"[{state['active_agent']}] {state['messages'][-1].content}")

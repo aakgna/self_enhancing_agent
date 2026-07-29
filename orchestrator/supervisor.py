@@ -141,12 +141,19 @@ def _credential_gate(state: AgentState, handle) -> list | None:
     user_id, request = state["user_id"], _latest_human_text(state)
     if not mcp_bindings.is_bound(user_id, service):
         service_entry = mcp_bindings.KNOWN_SERVICES[service]
+        # One round trip: the approval prompt already carries everything
+        # needed to obtain the credential (instructions + field labels), so
+        # the REPL can collect it and resume once, rather than a second
+        # interrupt just to ask "now give me the value".
         decision = interrupt(
             {
                 "type": "credential_approval",
                 "service": service,
                 "scope": service_entry["scope"],
                 "note": service_entry.get("real_service_note"),
+                "credential_type": service_entry["credential_type"],
+                "fields": service_entry["credential_fields"],
+                "acquisition_instructions": service_entry["acquisition_instructions"],
                 "agent_id": handle.agent_id,
                 "reason": request,
             }
@@ -157,7 +164,7 @@ def _credential_gate(state: AgentState, handle) -> list | None:
                 agent_id=handle.agent_id, payload={"service": service},
             )
             return None
-        mcp_bindings.bind(user_id, service, request)
+        mcp_bindings.bind(user_id, service, request, values=decision.get("values"))
         write_trace(
             user_id=user_id, node="execute", event="capability_bound",
             agent_id=handle.agent_id, payload={"service": service},

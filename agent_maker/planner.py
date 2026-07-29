@@ -109,20 +109,25 @@ def dedup_tools(spec: AgentSpec, user_id: str) -> AgentSpec:
 
 
 def plan(request: str, rejected: list[SearchHit], user_id: str) -> AgentSpec:
-    from orchestrator.mcp_bindings import KNOWN_SERVICES
+    from orchestrator.mcp_bindings import planner_catalog
 
+    # Only services marked planner_eligible are offered here — e.g. gmail_imap
+    # is fully wired but deliberately excluded so "check my email" doesn't
+    # silently start asking for a real Gmail app password. See
+    # mcp_bindings.py's module docstring.
+    catalog = planner_catalog()
     rejected_text = "\n".join(
         f"- {h.manifest.id}: {h.manifest.description}" for h in rejected
     ) or "- (none were close)"
     services_text = "\n".join(
-        f"  - {name}: {entry['scope']}" for name, entry in KNOWN_SERVICES.items()
+        f"  - {name}: {entry['scope']}" for name, entry in catalog.items()
     ) or "  - (none available)"
     spec = (
         agent_llm()
         .with_structured_output(AgentSpec)
         .invoke(_PROMPT.format(request=request, rejected=rejected_text, services=services_text))
     )
-    if spec.mcp_service not in KNOWN_SERVICES:
+    if spec.mcp_service not in catalog:
         spec.mcp_service = None
     spec.proposed_agent_name = _sanitize_name(spec.proposed_agent_name, user_id)
     if request not in spec.example_requests:
