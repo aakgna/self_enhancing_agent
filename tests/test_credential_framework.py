@@ -4,16 +4,29 @@ dispatch, and the REPL's approval/collection logic. Complements
 test_credential_gate.py, which covers the mock_email end-to-end graph path."""
 
 import imaplib
+import json
 
 import pytest
 
+from db.conn import get_conn
 from orchestrator import chat, mcp_bindings
 from tests.test_gmail_imap_tool import SAMPLE_HEADERS, FakeIMAP
+
+# Tests in this file share this literal id rather than a fresh uuid per test
+# (most just check pure function behavior, not cross-test isolation) — which
+# means capability_ledger rows from bind() calls accumulate across runs if
+# not cleaned up. This was a real bug: 19 stray "u1/gmail_imap" rows built up
+# in the real Postgres database over repeated test runs, unrelated to any
+# actual user, because nothing ever deleted them.
+_TEST_USER = "u1"
 
 
 @pytest.fixture(autouse=True)
 def isolated_credentials(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_bindings, "CREDENTIALS_PATH", tmp_path / "credentials.json")
+    get_conn().execute("DELETE FROM capability_ledger WHERE user_id = %s", (_TEST_USER,))
+    yield
+    get_conn().execute("DELETE FROM capability_ledger WHERE user_id = %s", (_TEST_USER,))
 
 
 def test_gmail_imap_is_not_planner_eligible():
@@ -70,6 +83,43 @@ def test_bind_then_get_tools_full_round_trip_against_real_gmail_tool(monkeypatch
     list_unread = next(t for t in tools if t.name == "list_unread")
     result = list_unread.invoke({"limit": 5})
     assert "boss@example.com" in result
+
+
+def test_get_tools_raises_on_old_string_format_credential():
+    """Regression test for a live crash: a credential written before the
+    dict-based storage schema (a bare string, e.g. {"me/mock_email": "demo-
+    xxxx"}) made get_tools() try stored["token"] on a str and raise a bare
+    TypeError. It must now raise the typed, catchable CredentialUnavailable
+    instead, so the caller can self-heal (see supervisor.py's
+    credential_reset path) rather than crash."""
+    mcp_bindings.CREDENTIALS_PATH.parent.mkdir(exist_ok=True)
+    mcp_bindings.CREDENTIALS_PATH.write_text(json.dumps({"u1/mock_email": "demo-old-format"}))
+    with pytest.raises(mcp_bindings.CredentialUnavailable):
+        mcp_bindings.get_tools("u1", "mock_email")
+
+
+def test_get_tools_raises_on_missing_direct_source_fields():
+    mcp_bindings.CREDENTIALS_PATH.parent.mkdir(exist_ok=True)
+    mcp_bindings.CREDENTIALS_PATH.write_text(
+        json.dumps({"u1/gmail_imap": {"email_address": "a@b.com"}})  # app_password missing
+    )
+    with pytest.raises(mcp_bindings.CredentialUnavailable):
+        mcp_bindings.get_tools("u1", "gmail_imap")
+
+
+def test_forget_clears_ledger_and_credential():
+    mcp_bindings.bind("u1", "mock_email", "check my email")
+    assert mcp_bindings.is_bound("u1", "mock_email") is True
+
+    mcp_bindings.forget("u1", "mock_email")
+
+    assert mcp_bindings.is_bound("u1", "mock_email") is False
+    with pytest.raises(KeyError):
+        mcp_bindings._load_credential("u1", "mock_email")
+
+
+def test_forget_is_a_no_op_when_nothing_is_bound():
+    mcp_bindings.forget("u1", "mock_email")  # must not raise
 
 
 def test_get_tools_direct_source_dispatches_with_stored_values(monkeypatch):

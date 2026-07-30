@@ -186,13 +186,26 @@ def bind(user_id: str, service: str, triggering_request: str, values: dict[str, 
     )
 
 
+class CredentialUnavailable(RuntimeError):
+    """The stored credential for a service is missing or doesn't match the
+    shape this code expects (e.g. an old storage format from before a schema
+    change). The caller should treat this as "not actually bound" and
+    re-request approval rather than crash the request — see
+    supervisor.py::_credential_gate."""
+
+
 def get_tools(user_id: str, service: str) -> list[StructuredTool]:
     """Live tools for a bound service, wrapped for synchronous agents."""
     entry = KNOWN_SERVICES[service]
-    stored = _load_credential(user_id, service)
-
-    if entry["source"] == "direct":
-        return entry["build_tools"](**stored)
+    try:
+        stored = _load_credential(user_id, service)
+        if entry["source"] == "direct":
+            return entry["build_tools"](**stored)
+        credential_value = stored["token"]
+    except (KeyError, TypeError, FileNotFoundError, json.JSONDecodeError) as exc:
+        raise CredentialUnavailable(
+            f"stored credential for {service!r} is missing or in an unrecognized shape: {exc}"
+        ) from exc
 
     from langchain_mcp_adapters.client import MultiServerMCPClient
 
@@ -201,13 +214,27 @@ def get_tools(user_id: str, service: str) -> list[StructuredTool]:
             service: {
                 "command": str(PYTHON),
                 "args": [entry["server"]],
-                "env": {entry["credential_env"]: stored["token"]},
+                "env": {entry["credential_env"]: credential_value},
                 "transport": "stdio",
             }
         }
     )
     async_tools = asyncio.run(client.get_tools())
     return [_sync_wrap(t) for t in async_tools]
+
+
+def forget(user_id: str, service: str) -> None:
+    """Clear a binding's ledger record and stored credential. Used when the
+    stored credential turns out to be unusable, so the next request
+    re-triggers a fresh approval instead of crashing on the same stale data
+    every time."""
+    get_conn().execute(
+        "DELETE FROM capability_ledger WHERE user_id = %s AND service = %s", (user_id, service)
+    )
+    if CREDENTIALS_PATH.exists():
+        store = json.loads(CREDENTIALS_PATH.read_text())
+        if store.pop(f"{user_id}/{service}", None) is not None:
+            CREDENTIALS_PATH.write_text(json.dumps(store, indent=2))
 
 
 def _sync_wrap(async_tool) -> StructuredTool:

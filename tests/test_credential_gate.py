@@ -14,9 +14,18 @@ from langgraph.types import Command
 
 from db import prompt_store
 from db.conn import get_conn
-from orchestrator import classifier, registry, supervisor
+from orchestrator import classifier, mcp_bindings, registry, supervisor
 from orchestrator.agent_loader import AGENTS_ROOT
 from orchestrator.classifier import ClassifierVerdict
+
+
+@pytest.fixture(autouse=True)
+def isolated_credentials(tmp_path, monkeypatch):
+    # Without this, every test run writes real entries into the same
+    # local_cache/credentials.json a live REPL session reads from — this was
+    # a real bug (found live): stale test-written entries accumulated there
+    # and, combined with an old storage-format entry, crashed a real session.
+    monkeypatch.setattr(mcp_bindings, "CREDENTIALS_PATH", tmp_path / "credentials.json")
 
 AGENT_PY = '''
 from langchain_core.messages import AIMessage
@@ -149,3 +158,48 @@ def test_approve_binds_and_reads_real_mock_inbox(monkeypatch, cred_user):
     result2 = graph.invoke(initial_state(cred_user), config2)
     assert "__interrupt__" not in result2
     assert "boss@example.com" in result2["messages"][-1].content
+
+
+def test_stale_credential_self_heals_instead_of_crashing(monkeypatch, cred_user):
+    """Regression test for a live crash: a binding approved under an older
+    storage format (a bare string) left the ledger saying 'bound' while the
+    stored credential was unusable by current code. The graph must not
+    crash — it should detect this, forget the stale binding, and fall
+    through to a fresh approval request exactly as if never bound."""
+    import json
+
+    from db.conn import get_conn as _get_conn
+
+    # Simulate the old format directly (bypasses bind(), which now always
+    # writes the current dict shape) plus a pre-existing "bound" ledger row.
+    mcp_bindings.CREDENTIALS_PATH.parent.mkdir(exist_ok=True)
+    mcp_bindings.CREDENTIALS_PATH.write_text(
+        json.dumps({f"{cred_user}/mock_email": "demo-old-format-token"})
+    )
+    _get_conn().execute(
+        """
+        INSERT INTO capability_ledger (user_id, service, action, triggering_request, approved_at)
+        VALUES (%s, 'mock_email', 'bound', 'an earlier request', now())
+        """,
+        (cred_user,),
+    )
+
+    graph = make_graph(monkeypatch)
+    config = {"configurable": {"thread_id": f"{cred_user}-stale"}}
+
+    # No crash: self-heals into a normal fresh-approval interrupt.
+    result = graph.invoke(initial_state(cred_user), config)
+    assert "__interrupt__" in result
+    payload = result["__interrupt__"][0].value
+    assert payload["service"] == "mock_email"
+
+    heal_trace = _get_conn().execute(
+        "SELECT payload FROM traces WHERE user_id = %s AND event = 'credential_reset'",
+        (cred_user,),
+    ).fetchone()
+    assert heal_trace is not None
+    assert heal_trace[0]["service"] == "mock_email"
+
+    # Approving from here works exactly like a first-time binding.
+    result = graph.invoke(Command(resume={"approved": True}), config)
+    assert "boss@example.com" in result["messages"][-1].content

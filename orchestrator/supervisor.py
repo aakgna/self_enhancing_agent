@@ -160,6 +160,22 @@ def _credential_gate(state: AgentState, handle) -> list | None:
         return None
 
     user_id, request = state["user_id"], _latest_human_text(state)
+
+    if mcp_bindings.is_bound(user_id, service):
+        try:
+            return mcp_bindings.get_tools(user_id, service)
+        except mcp_bindings.CredentialUnavailable as exc:
+            # Self-heal rather than crash: a previously-approved binding's
+            # stored credential is unusable (e.g. an old storage format from
+            # before a schema change — this happened live). Forget it and
+            # fall through to request a fresh approval below, exactly as if
+            # it had never been bound.
+            mcp_bindings.forget(user_id, service)
+            write_trace(
+                user_id=user_id, node="execute", event="credential_reset",
+                agent_id=handle.agent_id, payload={"service": service, "reason": str(exc)},
+            )
+
     if not mcp_bindings.is_bound(user_id, service):
         service_entry = mcp_bindings.KNOWN_SERVICES[service]
         # One round trip: the approval prompt already carries everything
