@@ -60,6 +60,27 @@ def route_node(state: AgentState) -> dict:
 
     agent_id = result.decision
     handles = agent_loader.discover(state["user_id"])
+
+    if agent_id not in handles:
+        # The registry named an agent whose files don't exist — a dangling
+        # pointer, not a real agent to route to (see registrar.purge_agent's
+        # docstring for how this class of drift happens). Self-heal: purge
+        # the stale entry and fall through to the same no_match_found path,
+        # which is already wired to generate a fresh one.
+        from agent_maker import registrar
+
+        registrar.purge_agent(state["user_id"], agent_id, delete_files=False)
+        classifier.log_gap(state["user_id"], request, result.candidates)
+        entry = {"request": request, "routed_to": classifier.NO_MATCH}
+        write_trace(
+            user_id=state["user_id"],
+            node="route",
+            event="orphaned_registry_entry_purged",
+            agent_id=agent_id,
+            payload=entry,
+        )
+        return {"active_agent": None, "routing_history": [*state["routing_history"], entry]}
+
     entry = {"request": request, "routed_to": agent_id}
     write_trace(
         user_id=state["user_id"],

@@ -215,6 +215,62 @@ def test_contract_check_applies_only_to_known_credentialed_services():
     assert contract_check.applies("some_unknown_service") is False
 
 
+def test_purge_agent_removes_registry_prompts_and_files(tmp_path, monkeypatch):
+    """Regression test for a live crash: a directory was removed by hand
+    (rm -rf) without also removing its registry row, leaving a dangling
+    pointer that crashed route_node on the next request. purge_agent must
+    remove all three pieces atomically so that mistake isn't repeatable."""
+    from orchestrator import agent_loader, registry
+    from orchestrator.manifest import Manifest
+
+    monkeypatch.setattr(agent_loader, "AGENTS_ROOT", tmp_path)
+    user_id, agent_id = "purge_user", "purge_target"
+
+    manifest = Manifest(
+        id=agent_id, user_id=user_id, type="agent", name="Purge Target",
+        description="test fixture to be purged", example_requests=["do the thing"],
+    )
+    registry.upsert(manifest)
+    prompt_store.seed_prompt(agent_id, user_id, "seed prompt")
+    agent_dir = tmp_path / user_id / agent_id
+    agent_dir.mkdir(parents=True)
+    (agent_dir / "agent.py").write_text("x = 1\n")
+
+    registrar.purge_agent(user_id, agent_id, delete_files=True)
+
+    row = get_conn().execute(
+        "SELECT count(*) FROM manifest_embeddings WHERE manifest_id = %s", (manifest.key,)
+    ).fetchone()
+    assert row[0] == 0
+    assert prompt_store.get_prompt(agent_id, user_id) is None
+    assert not agent_dir.exists()
+
+
+def test_purge_agent_can_skip_file_deletion(tmp_path, monkeypatch):
+    """route_node's self-healing path uses delete_files=False since the
+    files are already gone (that's why it's healing in the first place)."""
+    from orchestrator import agent_loader, registry
+    from orchestrator.manifest import Manifest
+
+    monkeypatch.setattr(agent_loader, "AGENTS_ROOT", tmp_path)
+    user_id, agent_id = "purge_user2", "purge_target2"
+    manifest = Manifest(
+        id=agent_id, user_id=user_id, type="agent", name="X",
+        description="test fixture", example_requests=["hi"],
+    )
+    registry.upsert(manifest)
+    agent_dir = tmp_path / user_id / agent_id
+    agent_dir.mkdir(parents=True)
+
+    registrar.purge_agent(user_id, agent_id, delete_files=False)
+
+    row = get_conn().execute(
+        "SELECT count(*) FROM manifest_embeddings WHERE manifest_id = %s", (manifest.key,)
+    ).fetchone()
+    assert row[0] == 0
+    assert agent_dir.exists()  # untouched
+
+
 def test_quarantine_hides_dir_from_loader(tmp_path):
     agent_dir = tmp_path / "bad_agent"
     agent_dir.mkdir()

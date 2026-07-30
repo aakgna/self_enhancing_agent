@@ -6,9 +6,10 @@ existing tool is swapped in instead. This is the defense against near-identical
 tools piling up per user.
 """
 
+import json
 import re
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from orchestrator import registry
 from orchestrator.llm import agent_llm
@@ -45,6 +46,21 @@ class AgentSpec(BaseModel):
         default_factory=list,
         description="5-8 diverse user phrasings this agent should handle",
     )
+
+    @field_validator("input_schema", "output_schema", mode="before")
+    @classmethod
+    def _coerce_json_string_schemas(cls, value):
+        # Defense in depth: structured-output tool calling has, in practice,
+        # occasionally serialized a nested dict field as a JSON string
+        # instead of a proper object (seen live with forced tool calling +
+        # thinking — see plan()'s method="json_schema" for the actual fix).
+        # Tolerate it here rather than crash on a model formatting quirk.
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return {}
+        return value
 
 
 _PROMPT = """\
@@ -124,7 +140,12 @@ def plan(request: str, rejected: list[SearchHit], user_id: str) -> AgentSpec:
     ) or "  - (none available)"
     spec = (
         agent_llm()
-        .with_structured_output(AgentSpec)
+        # method="json_schema" uses native structured output (output_config.format)
+        # instead of the default forced-tool-calling emulation, which LangChain
+        # itself warns is not guaranteed to hold together with thinking enabled —
+        # confirmed live: forced tool calling returned output_schema as a JSON
+        # string instead of a nested object, crashing pydantic validation.
+        .with_structured_output(AgentSpec, method="json_schema")
         .invoke(_PROMPT.format(request=request, rejected=rejected_text, services=services_text))
     )
     if spec.mcp_service not in catalog:

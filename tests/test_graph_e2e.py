@@ -121,3 +121,61 @@ def test_no_match_path_logs_capability_gap(monkeypatch, user_id):
     ).fetchall()
     assert len(gaps) == 1
     assert gaps[0][0] == "check my email for urgent messages"
+
+
+def test_route_node_self_heals_a_dangling_registry_pointer(monkeypatch, user_id):
+    """Regression test for a live crash: a manual cleanup removed a generated
+    agent's directory without removing its registry row, so the classifier
+    could still pick it — and route_node crashed with a bare KeyError trying
+    to load a directory that no longer existed. It must now purge the stale
+    entry and fall through to no_match_found (which already knows how to
+    regenerate) instead of crashing the whole request."""
+    from orchestrator.manifest import Manifest
+
+    prompt_store.init_db()
+    registry.init_registry()
+    registry.backfill()
+
+    ghost_id = "ghost_agent_no_files_on_disk"
+    registry.upsert(
+        Manifest(
+            id=ghost_id, user_id=user_id, type="agent", name="Ghost",
+            description="a registry entry with no corresponding files on disk",
+            example_requests=["do the ghost thing"],
+        )
+    )
+    monkeypatch.setattr(
+        classifier,
+        "fast_llm",
+        lambda: FakeClassifierLLM(ClassifierVerdict(decision="route_to_existing", agent_id=ghost_id)),
+    )
+    import agent_maker.maker as maker_module
+
+    monkeypatch.setattr(maker_module, "make_agent", lambda *a, **k: None)
+
+    graph = supervisor.build_graph()
+    result = graph.invoke(
+        {
+            "messages": [HumanMessage(content="do the ghost thing")],
+            "user_id": user_id,
+            "active_agent": None,
+            "agent_scratchpad": {},
+            "routing_history": [],
+        }
+    )
+
+    # No crash: falls through the same path a genuine no-match takes.
+    assert result["active_agent"] is None
+    assert result["routing_history"][-1]["routed_to"] == "no_match_found"
+
+    row = get_conn().execute(
+        "SELECT count(*) FROM manifest_embeddings WHERE manifest_id = %s",
+        (f"{user_id}/agent/{ghost_id}",),
+    ).fetchone()
+    assert row[0] == 0  # dangling pointer purged, not left to crash the next request too
+
+    heal_trace = get_conn().execute(
+        "SELECT agent_id FROM traces WHERE user_id = %s AND event = 'orphaned_registry_entry_purged'",
+        (user_id,),
+    ).fetchone()
+    assert heal_trace == (ghost_id,)

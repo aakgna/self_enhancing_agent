@@ -57,6 +57,42 @@ def register(spec: AgentSpec, agent_dir: Path, user_id: str, triggering_request:
     return manifest
 
 
+def purge_agent(user_id: str, agent_id: str, delete_files: bool = True) -> None:
+    """Atomically remove everything for one generated agent: registry entry,
+    prompt versions, and (optionally) its directory.
+
+    Two callers:
+      - route_node's self-healing path, when the registry names an agent
+        whose files are already gone (drift — see the module docstring
+        context: local generated-agent files have no persistence story
+        independent of the registry, so a redeploy/disk reset can produce
+        exactly this). delete_files=False there, since there's nothing left
+        to delete on disk.
+      - maintainer/dev cleanup of test artifacts, replacing ad hoc `rm -rf`
+        + hand-written SQL — that two-step manual process is what caused the
+        drift in the first place (a directory removed without also removing
+        its registry row).
+
+    Not a user-facing "delete agent" feature — the product lifecycle stays
+    create-only. This only ever removes agents that are already gone or that
+    a maintainer is deliberately cleaning up.
+    """
+    from orchestrator.agent_loader import AGENTS_ROOT
+
+    conn = get_conn()
+    conn.execute(
+        "DELETE FROM manifest_embeddings WHERE manifest_id = %s", (f"{user_id}/agent/{agent_id}",)
+    )
+    conn.execute("DELETE FROM agent_prompts WHERE agent_id = %s AND user_id = %s", (agent_id, user_id))
+    conn.execute(
+        "DELETE FROM agent_prompt_current WHERE agent_id = %s AND user_id = %s", (agent_id, user_id)
+    )
+    if delete_files:
+        import shutil
+
+        shutil.rmtree(AGENTS_ROOT / user_id / agent_id, ignore_errors=True)
+
+
 def log_failure(
     user_id: str, spec: AgentSpec, request: str, reason: str, output: str | None
 ) -> None:
