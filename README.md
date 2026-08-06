@@ -1,3 +1,5 @@
+# uv run python -m orchestrator.chat --user me
+
 # enhanced_agent — self-extending multi-agent system
 
 A LangGraph supervisor that routes user requests to per-user agents — and when
@@ -9,7 +11,7 @@ lifecycle · additive-only generation (the generator never edits existing
 files) · prompts versioned in Postgres · async, silent, non-blocking
 regression testing · codegen via an agentic coding harness (Claude Agent SDK),
 not a hand-rolled file-writing loop · a versioned, editable domain scope gate
-that decides whether an *uncovered* request may be built into a new agent at
+that decides whether an _uncovered_ request may be built into a new agent at
 all.
 
 ## LLM fallback
@@ -103,7 +105,7 @@ flow is incomplete, and `route_node` gives it the next turn outright.
 `checkin` is the worked example, and — critically — it's also now one of the
 generator's three worked examples (`agent_maker/prompts/
 generator_system_prompt.md`), with an explicit "Multi-turn agents" section
-teaching this convention. Without that, a *generated* multi-turn agent (e.g.
+teaching this convention. Without that, a _generated_ multi-turn agent (e.g.
 a scheduler collecting a name, then a date, then confirming) had no model of
 this pattern at all: a follow-up reply looked like a brand-new, unrelated
 request to `route_node`, which could misroute it or — worse — trigger
@@ -167,6 +169,7 @@ agent can only create files inside its own directory.
 
 Two things had to be fixed for any of this to actually work, not just read
 correctly in the prompt:
+
 - The generation sandbox (`agent_maker/sandbox_runner.py`) had no
   `PYTHONPATH` back to the repo root, so `import tools.shared...` failed
   with `ModuleNotFoundError` — confirmed live, and exactly why earlier
