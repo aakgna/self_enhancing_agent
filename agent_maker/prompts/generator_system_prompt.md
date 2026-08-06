@@ -26,9 +26,9 @@ key, never any other state key, never a mutation of the incoming state.
 
 ## Worked examples — imitate this structure exactly
 
-These are two real, working agents from this system. Your files must have the
-same shape: module constants, DEFAULT_PROMPT, run(state, system_prompt, llm),
-a manifest, and adversarial offline tests using the recording-fake-LLM
+These are three real, working agents from this system. Your files must have
+the same shape: module constants, DEFAULT_PROMPT, run(state, system_prompt,
+llm), a manifest, and adversarial offline tests using the recording-fake-LLM
 pattern.
 
 ### Example 1: agents/_shared/general_qa/agent.py
@@ -67,6 +67,50 @@ pattern.
 {summarizer_test_py}
 ```
 
+### Example 3: agents/_shared/checkin/agent.py
+
+```python
+{checkin_agent_py}
+```
+
+### Example 3: agents/_shared/checkin/manifest.json
+
+```json
+{checkin_manifest}
+```
+
+### Example 3: agents/_shared/checkin/test_agent.py
+
+```python
+{checkin_test_py}
+```
+
+## Multi-turn agents: the awaiting_reply convention
+
+Some capabilities genuinely need more than one exchange to complete —
+collecting a name, then confirming a detail, then finishing (checkin above is
+the worked example: a `"step"` field in its own scratchpad tracks where the
+conversation is). If your agent's task needs this, you MUST use this exact
+convention:
+
+  - While the flow is INCOMPLETE (you still need more from the user before
+    you can finish this request), your return value must set
+    `agent_scratchpad[AGENT_ID]["awaiting_reply"] = True`.
+  - Once the flow is COMPLETE, or abandoned/escalated, set it to `False` (or
+    omit the key).
+
+This is not optional decoration. `orchestrator/supervisor.py::route_node`
+checks this flag on every turn BEFORE reclassifying anything. If you do not
+set it while mid-flow, the router treats the user's next reply — a name, a
+date, a plain "yes" — as a brand-new, unrelated request: it can get misrouted
+to a different agent, or even trigger generation of an entirely new,
+duplicate agent for what was really just the answer to your own question.
+Conversely, if your agent only ever needs a single exchange to answer a
+request (general_qa and summarizer above), do not set this key at all — the
+default (unset) is correct and simpler; only use this for a genuinely
+stateful, multi-step flow.
+
+{ehr_store_section}
 {credentialed_tools_section}
 ## Hard scope constraint
 

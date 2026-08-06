@@ -120,12 +120,24 @@ def set_flagged(manifest_key: str, flagged: bool) -> None:
 
 
 def backfill(repo_root: Path | None = None) -> list[str]:
-    """Load every manifest.json under agents/ and tools/ into the registry."""
+    """Load every manifest.json under agents/ and tools/ into the registry.
+
+    Skips dot-prefixed agent directories (e.g. agents/me/.quarantined_x/),
+    matching agent_loader._scan()'s existing quarantine convention — without
+    this, backfill() would silently re-register an agent someone deliberately
+    purged (registrar.purge_agent(delete_files=False) only removes the
+    registry row; the directory is still on disk for backfill() to find
+    unless it's also dot-prefixed or actually deleted). This bit a real
+    session: purging four out-of-domain agents got silently undone the next
+    time a test script called backfill().
+    """
     root = repo_root or Path(__file__).resolve().parent.parent
     loaded = []
     for manifest_path in sorted(
         [*root.glob("agents/*/*/manifest.json"), *root.glob("tools/**/manifest.json")]
     ):
+        if manifest_path.parent.name.startswith("."):
+            continue
         manifest = Manifest.model_validate_json(manifest_path.read_text())
         upsert(manifest)
         loaded.append(manifest.key)

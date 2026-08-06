@@ -1,0 +1,127 @@
+[
+  {
+    "category": "hours",
+    "question": "What are your office hours?",
+    "answer": "We are open Monday through Friday from 8 AM to 6 PM, and Saturday from 9 AM to 1 PM. We are closed on Sundays and major holidays."
+  },
+  {
+    "category": "hours",
+    "question": "Are you open on weekends?",
+    "answer": "Yes, we are open on Saturdays from 9 AM to 1 PM. We are closed on Sundays."
+  },
+  {
+    "category": "hours",
+    "question": "What are your holiday hours?",
+    "answer": "We are closed on major federal holidays. Please call ahead or check our website for specific holiday closures."
+  },
+  {
+    "category": "parking",
+    "question": "Where can I park?",
+    "answer": "Free parking is available in Lot A off Oak Street and Lot B on Elm Avenue. Accessible parking spaces are located near the main entrance on the ground level."
+  },
+  {
+    "category": "parking",
+    "question": "Is there accessible parking?",
+    "answer": "Yes, accessible parking spaces are available directly in front of the main entrance. You will need a valid accessible parking placard or plate."
+  },
+  {
+    "category": "wayfinding",
+    "question": "Where is the lab or blood draw?",
+    "answer": "The lab and blood draw station is on the first floor, Room 105, just past the main reception desk. Follow the blue signs marked 'Laboratory'."
+  },
+  {
+    "category": "wayfinding",
+    "question": "Where is radiology or imaging?",
+    "answer": "Radiology and imaging are located on the second floor, Room 210. Take the main elevator and turn left. Follow the signs marked 'Radiology / Imaging'."
+  },
+  {
+    "category": "wayfinding",
+    "question": "Where is the pharmacy?",
+    "answer": "Our on-site pharmacy is on the ground floor near the east exit. Hours are Monday through Friday 9 AM to 5 PM."
+  },
+  {
+    "category": "wayfinding",
+    "question": "Where is the restroom?",
+    "answer": "Restrooms are located on every floor near the elevator lobby. The nearest ones to reception are just down the hall to the right."
+  },
+  {
+    "category": "check-in",
+    "question": "What do I need to bring to my appointment?",
+    "answer": "Please bring a government-issued photo ID, your insurance card, and any referral or prior authorization forms from your referring provider. Arrive 10 to 15 minutes early to complete any remaining paperwork."
+  },
+  {
+    "category": "check-in",
+    "question": "How early should I arrive for my appointment?",
+    "answer": "We recommend arriving 10 to 15 minutes before your scheduled appointment time to allow for check-in and any final paperwork."
+  },
+  {
+    "category": "appointments",
+    "question": "How do I schedule an appointment?",
+    "answer": "You can schedule an appointment by speaking with me here at the kiosk, calling our main line, or using the patient portal on our website. I can help you book right now if you'd like."
+  },
+  {
+    "category": "appointments",
+    "question": "Can I walk in without an appointment?",
+    "answer": "Walk-ins are welcome for urgent care visits during business hours, but scheduled appointments are given priority. For routine or specialist visits, an appointment is required."
+  },
+  {
+    "category": "appointments",
+    "question": "How do I cancel or reschedule my appointment?",
+    "answer": "To cancel or reschedule, please call our main reception line at least 24 hours in advance. You can also manage appointments through the patient portal."
+  },
+  {
+    "category": "billing",
+    "question": "What insurance plans do you accept?",
+    "answer": "We accept most major insurance plans including Medicare, Medicaid, Blue Cross Blue Shield, Aetna, Cigna, and UnitedHealthcare. Please check with your insurance provider to confirm our network status."
+  },
+  {
+    "category": "billing",
+    "question": "What is a copay?",
+    "answer": "A copay is the fixed amount you pay for a covered healthcare service, as specified by your insurance plan. Your copay amount is listed on your insurance card and will be confirmed during check-in."
+  },
+  {
+    "category": "billing",
+    "question": "Do you offer a payment plan?",
+    "answer": "Yes, we offer payment plans for outstanding balances. Please speak with our billing department after your visit or call the billing line to set up an arrangement."
+  },
+  {
+    "category": "billing",
+    "question": "Can I pay my bill online?",
+    "answer": "Yes, you can pay your bill through our secure patient portal on our website. We accept all major credit cards, debit cards, and Health Savings Account cards."
+  },
+  {
+    "category": "services",
+    "question": "Do you offer telehealth visits?",
+    "answer": "Yes, we offer telehealth video appointments for many types of visits. Ask a staff member or check the patient portal to schedule a virtual visit."
+  },
+  {
+    "category": "services",
+    "question": "Do you have urgent care?",
+    "answer": "We have an urgent care section for non-life-threatening conditions during regular business hours. For emergencies, please call 911 or go to the nearest emergency room."
+  },
+  {
+    "category": "services",
+    "question": "Do you provide referrals?",
+    "answer": "Yes, your primary care provider can provide referrals to specialists within and outside our network. Please bring any required referral paperwork to your specialist appointment."
+  },
+  {
+    "category": "records",
+    "question": "How do I get my medical records?",
+    "answer": "You can request medical records through the patient portal or by submitting a signed release form to our medical records department on the first floor, Room 108."
+  },
+  {
+    "category": "records",
+    "question": "How long does it take to get my test results?",
+    "answer": "Most lab results are available within 1 to 3 business days and will appear in your patient portal. Your provider will follow up if any results require attention."
+  },
+  {
+    "category": "general",
+    "question": "Is there Wi-Fi in the waiting area?",
+    "answer": "Yes, free guest Wi-Fi is available throughout the building. Connect to the network 'ClinicGuest' — no password required."
+  },
+  {
+    "category": "general",
+    "question": "Is the building wheelchair accessible?",
+    "answer": "Yes, the entire facility is wheelchair accessible. Ramps, automatic doors, and accessible restrooms are available on every floor."
+  }
+]

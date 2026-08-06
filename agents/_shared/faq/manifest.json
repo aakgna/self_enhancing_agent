@@ -1,0 +1,25 @@
+{
+  "id": "faq",
+  "user_id": "_shared",
+  "type": "agent",
+  "name": "Clinic FAQ",
+  "description": "Answers general clinic/front-desk questions from a static knowledge base: office hours, parking, wayfinding (lab, radiology, pharmacy, restrooms), what to bring to an appointment, scheduling policy, billing and insurance-accepted questions, telehealth/urgent-care availability, and medical records requests. Use for questions like 'what are your hours', 'where do I park', 'do you accept my insurance', or 'what should I bring to my appointment'. Not for same-day check-in (use the check-in agent), not for medical advice or diagnosis, not for looking up a specific patient's insurance coverage details, and not for booking or canceling a specific appointment.",
+  "example_requests": [
+    "what are your office hours",
+    "where can I park",
+    "where is the lab for blood work",
+    "what do I need to bring to my appointment",
+    "do you accept Blue Cross Blue Shield",
+    "is there wifi in the waiting area",
+    "how do I get my medical records",
+    "do you offer telehealth visits"
+  ],
+  "input_schema": {"type": "object", "properties": {"question": {"type": "string"}}, "required": ["question"]},
+  "output_schema": {"type": "object", "properties": {"answer": {"type": "string"}}, "required": ["answer"]},
+  "tools_used": [],
+  "dependencies": [],
+  "version": 1,
+  "created_at": "2026-08-04T00:00:00Z",
+  "flagged_for_review": false,
+  "requires_credentials": false
+}

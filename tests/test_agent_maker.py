@@ -8,10 +8,10 @@ import json
 
 import pytest
 
-from agent_maker import contract_check, maker, registrar
-from agent_maker.generator import _confinement_guard, _confinement_hook, build_system_prompt
+from agent_maker import contract_check, maker, registrar, sandbox_runner
+from agent_maker.generator import _confinement_guard, _confinement_hook, _is_upstream_api_failure, build_system_prompt
 from agent_maker.planner import AgentSpec
-from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny, ResultMessage
 from db import prompt_store
 from db.conn import get_conn
 
@@ -36,9 +36,16 @@ def test_prompt_assembly_fills_every_placeholder(spec, tmp_path):
     assert "class AgentState(TypedDict)" in prompt
     assert 'AGENT_ID = "general_qa"' in prompt
     assert 'AGENT_ID = "summarizer"' in prompt
+    assert 'AGENT_ID = "checkin"' in prompt
     assert "pig_latin_converter" in prompt
     assert str(tmp_path) in prompt
     assert "convert this text to pig latin" in prompt
+    # Regression test for a live bug: generated multi-turn agents never set
+    # awaiting_reply (the generator had no worked example of it), so a
+    # follow-up reply like a name or DOB got reclassified as a brand-new
+    # request instead of continuing the same agent's flow.
+    assert "awaiting_reply" in prompt
+    assert "route_node" in prompt
     # Maintainer header must not leak into the model prompt.
     assert "versioned in git, not in Postgres" not in prompt
     # No credentials in this spec: the generator must be told explicitly not
@@ -288,3 +295,116 @@ def test_failure_logging(spec):
     ).fetchone()
     assert row == ("pig_latin_converter", "tests failed after retries")
     get_conn().execute("DELETE FROM generation_failures WHERE user_id = 'user_y'")
+
+
+def _make_result(is_error: bool, api_error_status: int | None = None) -> ResultMessage:
+    return ResultMessage(
+        subtype="success",
+        duration_ms=100,
+        duration_api_ms=100,
+        is_error=is_error,
+        num_turns=1,
+        session_id="s1",
+        api_error_status=api_error_status,
+    )
+
+
+def test_is_upstream_api_failure_true_when_error_status_present():
+    assert _is_upstream_api_failure(_make_result(True, 400)) is True
+
+
+def test_is_upstream_api_failure_false_when_no_result_yet():
+    assert _is_upstream_api_failure(None) is False
+
+
+def test_is_upstream_api_failure_false_for_non_api_errors():
+    # is_error True for other reasons (e.g. hitting max_turns) never sets
+    # api_error_status — must not be mistaken for a provider-level failure.
+    assert _is_upstream_api_failure(_make_result(True, None)) is False
+
+
+def test_is_upstream_api_failure_false_on_clean_success():
+    assert _is_upstream_api_failure(_make_result(False, None)) is False
+
+
+class _FakeGenerationSession:
+    """Stands in for the real GenerationSession (which needs a live Claude
+    Agent SDK subprocess) so maker.py's provider-fallback orchestration can
+    be exercised offline. use_bedrock=True always reports an upstream API
+    failure right after generate() and never runs a sandbox test;
+    use_bedrock=False (the direct Anthropic API) behaves like ordinary
+    successful generation and lets sandbox_runner decide pass/fail — mirrors
+    Bedrock being preferred first and, on its own upstream failure, falling
+    back to the direct Anthropic API."""
+
+    def __init__(self, constructions, always_fails_upstream=False):
+        self._constructions = constructions
+        self._always_fails_upstream = always_fails_upstream
+
+    def __call__(self, spec, agent_dir, request, progress, use_bedrock=False):
+        self._constructions.append(use_bedrock)
+        return _FakeSessionInstance(use_bedrock, self._always_fails_upstream)
+
+
+class _FakeSessionInstance:
+    def __init__(self, use_bedrock, always_fails_upstream):
+        self._use_bedrock = use_bedrock
+        self._always_fails_upstream = always_fails_upstream
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def generate(self):
+        pass
+
+    async def refine(self, output):
+        pass
+
+    def upstream_api_failed(self):
+        if self._always_fails_upstream:
+            return True
+        return self._use_bedrock
+
+
+def test_generation_retries_via_anthropic_after_bedrock_upstream_api_failure(spec, tmp_path, monkeypatch):
+    """Regression test for a live incident: an exhausted Anthropic balance
+    made the coding harness's own subprocess silently fail every turn — no
+    exception, just a structurally-reported failure — which looked
+    identical to a genuine code bug and would otherwise burn the whole
+    sandbox-retry budget without ever writing a file. Bedrock is preferred
+    first whenever configured; when Bedrock's own call fails upstream, the
+    whole attempt must retry via the direct Anthropic API instead, and any
+    partial output left by the failed Bedrock attempt must not leak into
+    the retry."""
+    (tmp_path / "stale_from_failed_bedrock_attempt.txt").write_text("partial write")
+
+    constructions: list[bool] = []
+    monkeypatch.setattr(maker, "GenerationSession", _FakeGenerationSession(constructions))
+    monkeypatch.setattr(maker, "bedrock_configured", lambda: True)
+    monkeypatch.setattr(sandbox_runner, "run_tests", lambda agent_dir: (True, "ok"))
+
+    passed, output = asyncio.run(
+        maker._generate_with_retries(spec, tmp_path, "can I make an appointment today", print)
+    )
+
+    assert passed is True
+    assert constructions == [True, False]  # tried Bedrock first, then Anthropic
+    assert not (tmp_path / "stale_from_failed_bedrock_attempt.txt").exists()
+
+
+def test_generation_uses_anthropic_directly_when_bedrock_not_configured(spec, tmp_path, monkeypatch):
+    constructions: list[bool] = []
+    monkeypatch.setattr(
+        maker, "GenerationSession", _FakeGenerationSession(constructions, always_fails_upstream=True)
+    )
+    monkeypatch.setattr(maker, "bedrock_configured", lambda: False)
+
+    passed, output = asyncio.run(
+        maker._generate_with_retries(spec, tmp_path, "can I make an appointment today", print)
+    )
+
+    assert passed is False
+    assert constructions == [False]  # never tried Bedrock: not configured

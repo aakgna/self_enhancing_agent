@@ -62,6 +62,17 @@ class AgentSpec(BaseModel):
                 return {}
         return value
 
+    @field_validator("existing_tools_needed", "new_tools_needed", "example_requests", mode="before")
+    @classmethod
+    def _coerce_none_lists(cls, value):
+        # Defense in depth, same spirit as _coerce_json_string_schemas above:
+        # seen live with orchestrator/llm.py's OpenAI fallback, whose forced
+        # method="function_calling" returned these list fields as an explicit
+        # null instead of [] or omitting them — a live crash
+        # (ValidationError: Input should be a valid list) the direct
+        # Anthropic API's structured output never produced.
+        return [] if value is None else value
+
 
 _PROMPT = """\
 A user request had no matching agent in a per-user multi-agent system. Design \

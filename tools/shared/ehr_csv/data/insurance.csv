@@ -1,0 +1,6 @@
+insurance_id,patient_id,payer,member_id,member_name,group_number,plan_type,payer_id,claims_address,employer,inn_ded,inn_oop_max,oon_ded,oon_oop_max,customer_service_phone,precert_phone,mental_health_phone,active
+I001,P001,Blue Cross Blue Shield,BCBS-123456,,,PPO,,,,,,,,,,,true
+I002,P002,Aetna,AET-789012,,,HMO,,,,,,,,,,,true
+I003,P003,United Healthcare,UHC-345678,,,EPO,,,,,,,,,,,true
+I004,P004,Medicare,MCR-901234,,,Medicare Part B,,,,,,,,,,,true
+I005,P005,Cigna,CIG-567890,,,PPO,,,,,,,,,,,true

@@ -14,9 +14,10 @@ from langgraph.types import Command
 
 from db import prompt_store
 from db.conn import get_conn
-from orchestrator import classifier, mcp_bindings, registry, supervisor
+from orchestrator import classifier, mcp_bindings, registry, scope_gate, supervisor
 from orchestrator.agent_loader import AGENTS_ROOT
 from orchestrator.classifier import ClassifierVerdict
+from orchestrator.scope_gate import ScopeVerdict
 
 
 @pytest.fixture(autouse=True)
@@ -70,6 +71,14 @@ class FakeClassifierLLM:
         return ClassifierVerdict(decision="route_to_existing", agent_id="mail_reader")
 
 
+class FakeScopeLLM:
+    def with_structured_output(self, _schema):
+        return self
+
+    def invoke(self, _prompt):
+        return ScopeVerdict(in_scope=True, reason="")
+
+
 @pytest.fixture()
 def cred_user():
     uid = f"_cred_{uuid.uuid4().hex[:8]}"
@@ -96,6 +105,7 @@ def cred_user():
 
 def make_graph(monkeypatch):
     monkeypatch.setattr(classifier, "fast_llm", lambda: FakeClassifierLLM())
+    monkeypatch.setattr(scope_gate, "fast_llm", lambda: FakeScopeLLM())
     monkeypatch.setattr(supervisor, "agent_llm", lambda: object())  # agent never uses it
     return supervisor.build_graph(checkpointer=InMemorySaver())
 

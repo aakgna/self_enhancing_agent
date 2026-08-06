@@ -9,8 +9,9 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from db import prompt_store
 from db.conn import get_conn
-from orchestrator import classifier, registry, supervisor
+from orchestrator import classifier, registry, scope_gate, supervisor
 from orchestrator.classifier import ClassifierVerdict
+from orchestrator.scope_gate import ScopeVerdict
 
 
 class FakeAgentLLM:
@@ -29,6 +30,18 @@ class FakeClassifierLLM:
         return self.verdict
 
 
+class FakeScopeLLM:
+    def with_structured_output(self, _schema):
+        return self
+
+    def invoke(self, _prompt):
+        return ScopeVerdict(in_scope=True, reason="")
+
+
+def _stub_in_scope(monkeypatch):
+    monkeypatch.setattr(scope_gate, "fast_llm", lambda: FakeScopeLLM())
+
+
 @pytest.fixture()
 def user_id():
     uid = f"_e2e_{uuid.uuid4().hex[:8]}"
@@ -42,6 +55,7 @@ def test_graph_end_to_end(monkeypatch, user_id):
     prompt_store.init_db()
     registry.init_registry()
     registry.backfill()
+    _stub_in_scope(monkeypatch)
     monkeypatch.setattr(supervisor, "agent_llm", lambda: FakeAgentLLM())
     monkeypatch.setattr(
         classifier,
@@ -89,6 +103,7 @@ def test_no_match_path_logs_capability_gap(monkeypatch, user_id):
     prompt_store.init_db()
     registry.init_registry()
     registry.backfill()
+    _stub_in_scope(monkeypatch)
     monkeypatch.setattr(
         classifier,
         "fast_llm",
@@ -135,6 +150,7 @@ def test_route_node_self_heals_a_dangling_registry_pointer(monkeypatch, user_id)
     prompt_store.init_db()
     registry.init_registry()
     registry.backfill()
+    _stub_in_scope(monkeypatch)
 
     ghost_id = "ghost_agent_no_files_on_disk"
     registry.upsert(

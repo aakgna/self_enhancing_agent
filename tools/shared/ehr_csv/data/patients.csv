@@ -1,0 +1,6 @@
+patient_id,first_name,last_name,dob,phone,address,language,contact_method,email
+P001,Sarah,Johnson,1985-03-12,555-234-5678,123 Maple Street Riverside CA 92501,English,phone,sarah.johnson@example.com
+P002,Michael,Chen,1972-07-22,555-345-6789,456 Oak Avenue Riverside CA 92502,English,email,michael.chen@example.com
+P003,Maria,Garcia,1990-11-05,555-456-7890,789 Pine Road Riverside CA 92503,Spanish,phone,maria.garcia@example.com
+P004,James,Williams,1965-01-30,555-567-8901,321 Elm Street Riverside CA 92504,English,email,james.williams@example.com
+P005,Emily,Davis,2001-09-18,555-678-9012,654 Cedar Lane Riverside CA 92505,English,phone,emily.davis@example.com

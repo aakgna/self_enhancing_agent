@@ -1,0 +1,9 @@
+appointment_id,patient_id,provider_id,date,time,reason,status,calendar_provider,calendar_event_id,calendar_invite_status,calendar_error,notification_provider,notification_status,notification_message_id,notification_error,notification_sent_at
+A001,P001,PR001,2026-05-26,09:00,Annual checkup,scheduled,,,,,,,,,
+A002,P002,PR002,2026-05-26,10:30,Follow-up for hypertension,scheduled,,,,,,,,,
+A003,P003,PR001,2026-05-26,14:00,Knee pain evaluation,scheduled,,,,,,,,,
+A004,P004,PR003,2026-05-25,11:00,Diabetes management,completed,,,,,,,,,
+A006,P001,PR001,2026-06-02,13:00,Follow-up visit,scheduled,,,,,,,,,
+A007,P001,PR001,2026-07-09,09:30,headache,scheduled,,,,,,,,,
+A008,P001,PR001,2026-08-06,09:00,<UNKNOWN>,scheduled,,,,,,,,,
+A009,P001,PR001,2026-08-06,10:00,<UNKNOWN>,scheduled,,,,,,,,,

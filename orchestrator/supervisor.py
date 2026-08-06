@@ -13,10 +13,13 @@ import inspect
 from langchain_core.messages import AIMessage, BaseMessage
 
 from db import prompt_store
-from orchestrator import agent_loader, classifier, mcp_bindings, registry
+from orchestrator import agent_loader, classifier, mcp_bindings, registry, scope_gate
 from orchestrator.llm import agent_llm
 from orchestrator.state import AgentState
 from orchestrator.tracing import write_trace
+
+DECLINED_OUT_OF_SCOPE = "declined_out_of_scope"
+SCOPE_CONFIG_ID = "_scope"
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
@@ -35,28 +38,78 @@ def _latest_human_text(state: AgentState) -> str:
     return ""
 
 
+def _handle_capability_gap(state: AgentState, request: str, candidates: list) -> dict:
+    """No existing agent matched (a fresh miss, or a dangling registry
+    pointer that was just purged). Log the gap, then run the domain scope
+    gate — only a request that clears it may proceed to generation. The
+    scope gate runs HERE, not before the registry search: an existing,
+    already-in-domain agent should never pay for a redundant scope judgment
+    on every turn, and a match against it is not re-litigated. The trade-off
+    this implies — an out-of-domain agent left sitting in the registry would
+    become reachable again via ordinary classifier matching — is why any
+    agent outside the declared domain must be purged from the registry, not
+    just left unrouted (see :scope's docstring / README's domain scope gate
+    section for which agents that applies to)."""
+    classifier.log_gap(state["user_id"], request, candidates)
+    no_match_entry = {"request": request, "routed_to": classifier.NO_MATCH}
+    write_trace(
+        user_id=state["user_id"],
+        node="route",
+        event="no_match_found",
+        payload={
+            **no_match_entry,
+            "candidates": [
+                {"agent_id": h.manifest.id, "similarity": round(h.similarity, 4)}
+                for h in candidates
+            ],
+        },
+    )
+    history = [*state["routing_history"], no_match_entry]
+
+    scope_prompt, _ = prompt_store.seed_prompt(
+        SCOPE_CONFIG_ID, prompt_store.SHARED_USER, scope_gate.DEFAULT_SCOPE_PROMPT
+    )
+    verdict = scope_gate.check(request, scope_prompt)
+    if not verdict.in_scope:
+        decline_entry = {"request": request, "routed_to": DECLINED_OUT_OF_SCOPE}
+        write_trace(
+            user_id=state["user_id"],
+            node="route",
+            event=DECLINED_OUT_OF_SCOPE,
+            payload={**decline_entry, "reason": verdict.reason},
+        )
+        return {
+            "active_agent": None,
+            "messages": [AIMessage(content=verdict.reason)],
+            "routing_history": [*history, decline_entry],
+        }
+    return {"active_agent": None, "routing_history": history}
+
+
 def route_node(state: AgentState) -> dict:
-    """Registry similarity search + capability-gap classifier."""
+    """Registry similarity search + capability-gap classifier first; the
+    domain scope gate only runs on a miss, immediately before generation
+    would otherwise be attempted (see _handle_capability_gap)."""
     request = _latest_human_text(state)
+
+    # 0. Stickiness: an agent mid multi-turn flow (e.g. checkin) owns the next
+    # turn outright. Without this, a short reply like "yes" or a spoken DOB
+    # would be reclassified from scratch every turn (classify() never sees
+    # conversation history) and could be declined as out-of-scope or sent to
+    # the planner to build an agent for "yes". Any multi-turn agent opts in by
+    # setting agent_scratchpad[its_id]["awaiting_reply"] = True while its flow
+    # is incomplete; single-shot agents never set it, so their behavior is
+    # unchanged.
+    active = state.get("active_agent")
+    if active and state["agent_scratchpad"].get(active, {}).get("awaiting_reply"):
+        entry = {"request": request, "routed_to": active}
+        return {"active_agent": active, "routing_history": [*state["routing_history"], entry]}
+
     hits = registry.search(request, state["user_id"], top_k=5, type_filter="agent")
     result = classifier.classify(request, hits)
 
     if result.decision == classifier.NO_MATCH:
-        classifier.log_gap(state["user_id"], request, result.candidates)
-        entry = {"request": request, "routed_to": classifier.NO_MATCH}
-        write_trace(
-            user_id=state["user_id"],
-            node="route",
-            event="no_match_found",
-            payload={
-                **entry,
-                "candidates": [
-                    {"agent_id": h.manifest.id, "similarity": round(h.similarity, 4)}
-                    for h in result.candidates
-                ],
-            },
-        )
-        return {"active_agent": None, "routing_history": [*state["routing_history"], entry]}
+        return _handle_capability_gap(state, request, result.candidates)
 
     agent_id = result.decision
     handles = agent_loader.discover(state["user_id"])
@@ -65,21 +118,19 @@ def route_node(state: AgentState) -> dict:
         # The registry named an agent whose files don't exist — a dangling
         # pointer, not a real agent to route to (see registrar.purge_agent's
         # docstring for how this class of drift happens). Self-heal: purge
-        # the stale entry and fall through to the same no_match_found path,
+        # the stale entry and fall through to the same capability-gap path,
         # which is already wired to generate a fresh one.
         from agent_maker import registrar
 
         registrar.purge_agent(state["user_id"], agent_id, delete_files=False)
-        classifier.log_gap(state["user_id"], request, result.candidates)
-        entry = {"request": request, "routed_to": classifier.NO_MATCH}
         write_trace(
             user_id=state["user_id"],
             node="route",
             event="orphaned_registry_entry_purged",
             agent_id=agent_id,
-            payload=entry,
+            payload={"request": request},
         )
-        return {"active_agent": None, "routing_history": [*state["routing_history"], entry]}
+        return _handle_capability_gap(state, request, result.candidates)
 
     entry = {"request": request, "routed_to": agent_id}
     write_trace(
@@ -125,7 +176,11 @@ def make_agent_node(state: AgentState) -> dict:
 
 
 def _after_route(state: AgentState) -> str:
-    return "execute" if state["active_agent"] else "make_agent"
+    if state["active_agent"]:
+        return "execute"
+    if state["routing_history"] and state["routing_history"][-1]["routed_to"] == DECLINED_OUT_OF_SCOPE:
+        return END
+    return "make_agent"
 
 
 def _after_make(state: AgentState) -> str:
@@ -263,7 +318,7 @@ def build_graph(checkpointer=None):
     graph.add_node("execute", execute_node)
     graph.add_node("make_agent", make_agent_node)
     graph.add_edge(START, "route")
-    graph.add_conditional_edges("route", _after_route, ["execute", "make_agent"])
+    graph.add_conditional_edges("route", _after_route, ["execute", "make_agent", END])
     graph.add_conditional_edges("make_agent", _after_make, ["execute", END])
     graph.add_edge("execute", END)
     return graph.compile(checkpointer=checkpointer)

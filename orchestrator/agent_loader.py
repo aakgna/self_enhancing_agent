@@ -58,5 +58,19 @@ def load_module(handle: AgentHandle) -> ModuleType:
     spec = importlib.util.spec_from_file_location(module_name, handle.directory / "agent.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
-    spec.loader.exec_module(module)
+    # A generated agent may import a sibling helper module it wrote alongside
+    # agent.py (e.g. `from queue_status import ...`). That import succeeds
+    # during the sandboxed test run because pytest puts the test file's own
+    # directory on sys.path, but crashed here at first real production load
+    # with a bare ModuleNotFoundError — this mirrors that same behavior by
+    # adding the agent's own directory for the duration of the load.
+    # Narrow known gap: two different agents both writing a same-named helper
+    # (e.g. both writing "utils.py") would collide via the shared sys.modules
+    # cache — not addressed here.
+    agent_dir = str(handle.directory)
+    sys.path.insert(0, agent_dir)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(agent_dir)
     return module
